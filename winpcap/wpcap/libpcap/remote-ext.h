@@ -35,8 +35,10 @@
 #define __REMOTE_EXT_H__
 
 
+#if !EXTRAHOP_MODS
 #ifndef HAVE_REMOTE
 #error Please do not include this file directly. Just define HAVE_REMOTE and then include pcap.h
+#endif
 #endif
 
 // Definition for Microsoft Visual Studio
@@ -404,6 +406,7 @@ struct pcap_samp
 */ // end of public documentation
 
 
+#if !EXTRAHOP_MODS
 // Exported functions
 
 
@@ -434,6 +437,7 @@ int pcap_remoteact_close(const char *host, char *errbuf);
 void pcap_remoteact_cleanup();
 //\}
 // End of remote capture functions
+#endif
 
 #ifdef __cplusplus
 }

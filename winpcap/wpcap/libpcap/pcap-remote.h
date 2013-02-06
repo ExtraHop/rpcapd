@@ -34,10 +34,12 @@
 #ifndef __PCAP_REMOTE_H__
 #define __PCAP_REMOTE_H__
 
+#if !EXTRAHOP_MODS
 
 #include "pcap.h"
 #include "sockutils.h"	// Needed for some structures (like SOCKET, sockaddr_in) which are used here
 
+#endif
 
 /*!
 	\file pcap-remote.h
@@ -119,6 +121,7 @@ typedef int int32;					//!< Provides a 32-bits integer
 
 
 
+#if !EXTRAHOP_MODS
 
 /*!
 	\brief Keeps a list of all the opened connections in the active mode.
@@ -137,6 +140,7 @@ struct activehosts
 	struct activehosts *next;
 };
 
+#endif
 
 /*********************************************************
  *                                                       *
@@ -332,6 +336,7 @@ struct rpcap_sampling
 
 
 
+#if !EXTRAHOP_MODS
 
 
 /*********************************************************
@@ -361,3 +366,4 @@ int rpcap_remoteact_getsock(const char *host, char *errbuf);
 
 #endif
 
+#endif
