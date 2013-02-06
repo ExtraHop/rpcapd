@@ -924,6 +924,8 @@ struct rpcap_openreply *openreply;	// open reply message
 	// Puts a '0' to terminate the source string
 	source[strlen(PCAP_SRC_IF_STRING) + plen]= 0;
 
+	printf("Opening '%s'\n", source);
+
 	// Open the selected device
 	// This is a fake open, since we do that only to get the needed parameters, then we close the device again
 	if ( (fp= pcap_open(source, 
@@ -1067,6 +1069,7 @@ int serveropen_dp;							// keeps who is going to open the data connection
 			sock_geterror("getnameinfo(): ", errbuf, PCAP_ERRBUF_SIZE);
 			goto error;
 		}
+		printf("Connecting to udp %s:%s\n", peerhost, portdata);
 
 		if (sock_initaddress(peerhost, portdata, &hints, &addrinfo, errbuf, PCAP_ERRBUF_SIZE) == -1)
 			goto error;
@@ -1167,6 +1170,7 @@ int serveropen_dp;							// keeps who is going to open the data connection
 	pthread_attr_setdetachstate(&detachedAttribute, PTHREAD_CREATE_DETACHED);
 	
 	// Now we have to create a new thread to receive packets
+	printf("Starting packet sending thread\n");
 	if ( pthread_create(threaddata, &detachedAttribute, (void *) daemon_thrdatamain, (void *) fp) )
 	{
 		snprintf(errbuf, PCAP_ERRBUF_SIZE, "Error creating the data thread");
@@ -1552,6 +1556,7 @@ error:
 
 	free(sendbuf);
 
+	printf("Packet sending thread exiting\n");
 	return NULL;
 }
 
