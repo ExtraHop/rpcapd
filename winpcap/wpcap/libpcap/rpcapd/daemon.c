@@ -186,6 +186,8 @@ auth_again:
 			goto end;
 	}
 
+	memset(&samp_param, 0, sizeof(samp_param));
+
 	while (1)
 	{
 	int retval;
