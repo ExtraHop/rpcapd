@@ -49,6 +49,7 @@
 
 #ifdef linux
 #include <shadow.h>		// for password management
+#include <linux/if_packet.h>
 #endif
 
 
@@ -1548,7 +1549,7 @@ void daemon_seraddr(struct sockaddr_storage *sockaddrin, struct sockaddr_storage
 		sockaddr->sin_port= htons(sockaddr->sin_port);
 		memcpy(sockaddrout, sockaddr, sizeof(struct sockaddr_in) );
 	}
-	else
+	else if (sockaddrin->ss_family == AF_INET6)
 	{
 	struct sockaddr_in6 *sockaddr;
 	
@@ -1558,6 +1559,23 @@ void daemon_seraddr(struct sockaddr_storage *sockaddrin, struct sockaddr_storage
 		sockaddr->sin6_flowinfo= htonl(sockaddr->sin6_flowinfo);
 		sockaddr->sin6_scope_id= htonl(sockaddr->sin6_scope_id);
 		memcpy(sockaddrout, sockaddr, sizeof(struct sockaddr_in6) );
+	}
+#ifdef AF_PACKET
+	else if (sockaddrin->ss_family == AF_PACKET)
+	{
+	struct sockaddr_ll *sockaddr;
+
+	    sockaddr= (struct sockaddr *)sockaddrin;
+	    sockaddr->sll_family = htons(sockaddr->sll_family);
+	    memcpy(sockaddrout, sockaddr, sizeof(struct sockaddr_ll));
+	}
+#endif
+	else
+	{
+	struct sockaddr *sockaddr;
+		sockaddr= (struct sockaddr *)sockaddrin;
+		sockaddr->sa_family= htons(sockaddr->sa_family);
+		memcpy(sockaddrout, sockaddr, sizeof(struct sockaddr) );
 	}
 }
 
