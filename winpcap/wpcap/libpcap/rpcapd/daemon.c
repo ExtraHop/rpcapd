@@ -31,7 +31,6 @@
  */
 
 #include <pcap.h>		// for libpcap/WinPcap calls
-#include <pcap-int.h>	// for the pcap_t definition
 #include <errno.h>		// for the errno variable
 #include <stdlib.h>		// for malloc(), free(), ...
 #include <string.h>		// for strlen(), ...
@@ -53,6 +52,49 @@
 #endif
 
 
+struct daemon_ctx {
+    pcap_t *fp;
+    /*! \brief '1' if we're the network client; needed by several functions (like pcap_setfilter() ) to know if
+        they have to use the socket or they have to open the local adapter. */
+    int rmt_clientside;
+
+    SOCKET rmt_sockctrl;        //!< socket ID of the socket used for the control connection
+    SOCKET rmt_sockdata;        //!< socket ID of the socket used for the data connection
+    int rmt_flags;              //!< we have to save flags, since they are passed by the pcap_open_live(), but they are used by the pcap_startcapture()
+    int rmt_capstarted;         //!< 'true' if the capture is already started (needed to knoe if we have to call the pcap_startcapture()
+    struct pcap_samp rmt_samp;  //!< Keeps the parameters related to the sampling process.
+    char *currentfilter;        //!< Pointer to a buffer (allocated at run-time) that stores the current filter. Needed when flag PCAP_OPENFLAG_NOCAPTURE_RPCAP is turned on.
+
+    unsigned int TotCapt;
+};
+
+static struct daemon_ctx *
+daemon_ctx_open(const char *source, int snaplen, int flags, int read_timeout, struct pcap_rmtauth *auth, char *errbuf)
+{
+    struct daemon_ctx *fp = malloc(sizeof(struct daemon_ctx));
+    if (fp) {
+        memset(fp, 0, sizeof(struct daemon_ctx));
+        fp->fp = pcap_open(source, snaplen, flags, read_timeout, auth, errbuf);
+        if (!fp->fp) {
+            free(fp);
+            fp = NULL;
+        }
+    }
+    else {
+        snprintf(errbuf, PCAP_ERRBUF_SIZE, "malloc failed");
+    }
+    return fp;
+}
+
+static void
+daemon_ctx_close(struct daemon_ctx *fp)
+{
+    if (fp->fp) {
+        pcap_close(fp->fp);
+        fp->fp = NULL;
+    }
+    free(fp);
+}
 
 // Locally defined functions
 int daemon_checkauth(SOCKET sockctrl, int nullAuthAllowed, char *errbuf);
@@ -61,14 +103,14 @@ int daemon_AuthUserPwd(char *username, char *password, char *errbuf);
 int daemon_findalldevs(SOCKET sockctrl, char *errbuf);
 
 int daemon_opensource(SOCKET sockctrl, char *source, int srclen, uint32 plen, char *errbuf);
-pcap_t *daemon_startcapture(SOCKET sockctrl, pthread_t *threaddata, char *source, int active, 
+struct daemon_ctx *daemon_startcapture(SOCKET sockctrl, pthread_t *threaddata, char *source, int active,
 							struct rpcap_sampling *samp_param, uint32 plen, char *errbuf);
-int daemon_endcapture(pcap_t *fp, pthread_t *threaddata, char *errbuf);
+int daemon_endcapture(struct daemon_ctx *fp, pthread_t *threaddata, char *errbuf);
 
-int daemon_updatefilter(pcap_t *fp, uint32 plen);
-int daemon_unpackapplyfilter(pcap_t *fp, unsigned int *nread, int *plen, char *errbuf);
+int daemon_updatefilter(struct daemon_ctx *fp, uint32 plen);
+int daemon_unpackapplyfilter(struct daemon_ctx *fp, unsigned int *nread, int *plen, char *errbuf);
 
-int daemon_getstats(pcap_t *fp);
+int daemon_getstats(struct daemon_ctx *fp);
 int daemon_getstatsnopcap(SOCKET sockctrl, unsigned int ifdrops, unsigned int ifrecv, 
 						  unsigned int krnldrop, unsigned int svrcapt, char *errbuf);
 
@@ -76,8 +118,6 @@ int daemon_setsampling(SOCKET sockctrl, struct rpcap_sampling *samp_param, int p
 
 void daemon_seraddr(struct sockaddr_storage *sockaddrin, struct sockaddr_storage *sockaddrout);
 void *daemon_thrdatamain(void *ptr);
-
-
 
 
 
@@ -100,7 +140,7 @@ void daemon_serviceloop( void *ptr )
 char errbuf[PCAP_ERRBUF_SIZE + 1];		// keeps the error string, prior to be printed
 char source[PCAP_BUF_SIZE];				// keeps the string that contains the interface to open
 struct rpcap_header header;				// RPCAP message general header
-pcap_t *fp= NULL;						// pcap_t main variable
+struct daemon_ctx *fp= NULL;
 struct daemon_slpars *pars;				// parameters related to the present daemon loop
 
 pthread_t threaddata= 0;				// handle to the 'read from daemon and send to client' thread
@@ -310,7 +350,7 @@ auth_again:
 				if (fp)
 				{
 					if (daemon_updatefilter(fp, ntohl(header.plen)) )
-						SOCK_ASSERT(fp->errbuf, 1);
+						SOCK_ASSERT(pcap_geterr(fp->fp), 1);
 				}
 				else
 				{
@@ -329,7 +369,7 @@ auth_again:
 				if (fp)
 				{
 					if (daemon_getstats(fp) )
-						SOCK_ASSERT(fp->errbuf, 1);
+						SOCK_ASSERT(pcap_geterr(fp->fp), 1);
 				}
 				else
 				{
@@ -353,12 +393,12 @@ auth_again:
 				struct pcap_stat stats;
 
 					// Save statistics (we can need them in the future)
-					if (pcap_stats(fp, &stats) )
+					if (pcap_stats(fp->fp, &stats) )
 					{
 						ifdrops= stats.ps_ifdrop;
 						ifrecv= stats.ps_recv;
 						krnldrop= stats.ps_drop;
-						svrcapt= fp->md.TotCapt;
+						svrcapt= fp->TotCapt;
 					}
 					else
 						ifdrops= ifrecv= krnldrop= svrcapt= 0;
@@ -415,7 +455,7 @@ end:
 			sock_close(fp->rmt_sockdata, NULL, 0);
 			fp->rmt_sockdata= 0;
 		}
-		pcap_close(fp);
+		daemon_ctx_close(fp);
 		fp= NULL;
 	}
 
@@ -912,8 +952,8 @@ struct rpcap_openreply *openreply;	// open reply message
 		goto error;
 
 	memset(openreply, 0, sizeof(struct rpcap_openreply) );
-	openreply->linktype= htonl(fp->linktype);
-	openreply->tzoff= htonl(fp->tzoff);
+	openreply->linktype= htonl(pcap_datalink(fp));
+	/* XXX: openreply->tzoff= htonl(fp->tzoff); */
 
 	if ( sock_send(sockctrl, sendbuf, sendbufidx, errbuf, PCAP_ERRBUF_SIZE) == -1)
 		goto error;
@@ -942,11 +982,11 @@ error:
 	\param plen: the length of the current message (needed in order to be able
 	to discard excess data in the message, if present)
 */
-pcap_t *daemon_startcapture(SOCKET sockctrl, pthread_t *threaddata, char *source, int active, struct rpcap_sampling *samp_param, uint32 plen, char *errbuf)
+struct daemon_ctx *daemon_startcapture(SOCKET sockctrl, pthread_t *threaddata, char *source, int active, struct rpcap_sampling *samp_param, uint32 plen, char *errbuf)
 {
 char portdata[PCAP_BUF_SIZE];		// temp variable needed to derive the data port
 char peerhost[PCAP_BUF_SIZE];		// temp variable needed to derive the host name of our peer
-pcap_t *fp= NULL;					// pcap_t main variable
+struct daemon_ctx *fp= NULL;					// pcap_t main variable
 unsigned int nread;					// number of bytes of the payload read from the socket
 char sendbuf[RPCAP_NETBUF_SIZE];	// temporary buffer in which data to be sent is buffered
 int sendbufidx= 0;					// index which keeps the number of bytes currently buffered
@@ -973,7 +1013,7 @@ int serveropen_dp;							// keeps who is going to open the data connection
 	startcapreq.flags= ntohs(startcapreq.flags);
 
 	// Open the selected device
-	if ( (fp= pcap_open(source, 
+	if ( (fp= daemon_ctx_open(source,
 			ntohl(startcapreq.snaplen),
 			(startcapreq.flags & RPCAP_STARTCAPREQ_FLAG_PROMISC) ? PCAP_OPENFLAG_PROMISCUOUS : 0 /* local device, other flags not needed */, 
 			ntohl(startcapreq.read_timeout),
@@ -1088,7 +1128,7 @@ int serveropen_dp;							// keeps who is going to open the data connection
 		goto error;
 
 	memset(startcapreply, 0, sizeof(struct rpcap_startcapreply) );
-	startcapreply->bufsize= htonl(fp->bufsize);
+	/* XXX: startcapreply->bufsize= htonl(fp->bufsize); */
 
 	if (!serveropen_dp)
 	{
@@ -1159,7 +1199,7 @@ error:
 
 	if (fp)
 	{
-		pcap_close(fp);
+		daemon_ctx_close(fp);
 		fp= NULL;
 	}
 
@@ -1168,7 +1208,7 @@ error:
 
 
 
-int daemon_endcapture(pcap_t *fp, pthread_t *threaddata, char *errbuf)
+int daemon_endcapture(struct daemon_ctx *fp, pthread_t *threaddata, char *errbuf)
 {
 struct rpcap_header header;
 SOCKET sockctrl;
@@ -1186,7 +1226,7 @@ SOCKET sockctrl;
 
 	sockctrl= fp->rmt_sockctrl;
 
-	pcap_close(fp);
+	daemon_ctx_close(fp);
 	fp= NULL;
 
 	rpcap_createhdr( &header, RPCAP_MSG_ENDCAP_REPLY, 0, 0);
@@ -1199,7 +1239,7 @@ SOCKET sockctrl;
 
 
 
-int daemon_unpackapplyfilter(pcap_t *fp, unsigned int *nread, int *plen, char *errbuf)
+int daemon_unpackapplyfilter(struct daemon_ctx *fp, unsigned int *nread, int *plen, char *errbuf)
 {
 struct rpcap_filter filter;
 struct rpcap_filterbpf_insn insn;
@@ -1252,9 +1292,9 @@ unsigned int i;
 		return -1;
 	}
 
-	if (pcap_setfilter(fp, &bf_prog) )
+	if (pcap_setfilter(fp->fp, &bf_prog) )
 	{
-		snprintf(errbuf, PCAP_ERRBUF_SIZE, "RPCAP error: %s", fp->errbuf);
+		snprintf(errbuf, PCAP_ERRBUF_SIZE, "RPCAP error: %s", pcap_geterr(fp->fp));
 		return -1;
     }
 
@@ -1263,14 +1303,14 @@ unsigned int i;
 
 
 
-int daemon_updatefilter(pcap_t *fp, uint32 plen)
+int daemon_updatefilter(struct daemon_ctx *fp, uint32 plen)
 {
 struct rpcap_header header;			// keeps the answer to the updatefilter command
 unsigned int nread;
 
 	nread= 0;
 
-	if ( daemon_unpackapplyfilter(fp, &nread, &plen, fp->errbuf) )
+	if ( daemon_unpackapplyfilter(fp, &nread, &plen, pcap_geterr(fp->fp)) )
 		goto error;
 
 	// Check if all the data has been read; if not, discard the data in excess
@@ -1286,7 +1326,7 @@ unsigned int nread;
 	// A response is needed, otherwise the other host does not know that everything went well
 	rpcap_createhdr( &header, RPCAP_MSG_UPDATEFILTER_REPLY, 0, 0);
 
-	if ( sock_send(fp->rmt_sockctrl, (char *) &header, sizeof (struct rpcap_header), fp->errbuf, PCAP_ERRBUF_SIZE) )
+	if ( sock_send(fp->rmt_sockctrl, (char *) &header, sizeof (struct rpcap_header), pcap_geterr(fp->fp), PCAP_ERRBUF_SIZE) )
 		goto error;
 
 	return 0;
@@ -1296,7 +1336,7 @@ error:
 	if (nread != plen)
 		sock_discard(fp->rmt_sockctrl, plen - nread, NULL, 0);
 
-	rpcap_senderror(fp->rmt_sockctrl, fp->errbuf, PCAP_ERR_UPDATEFILTER, NULL);
+	rpcap_senderror(fp->rmt_sockctrl, pcap_geterr(fp->fp), PCAP_ERR_UPDATEFILTER, NULL);
 
 	return -1;
 }
@@ -1345,7 +1385,7 @@ error:
 
 
 
-int daemon_getstats(pcap_t *fp)
+int daemon_getstats(struct daemon_ctx *fp)
 {
 char sendbuf[RPCAP_NETBUF_SIZE];	// temporary buffer in which data to be sent is buffered
 int sendbufidx= 0;					// index which keeps the number of bytes currently buffered
@@ -1353,7 +1393,7 @@ struct pcap_stat stats;				// local statistics
 struct rpcap_stats *netstats;		// statistics sent on the network
 
 	if ( sock_bufferize(NULL, sizeof(struct rpcap_header), NULL, 
-		&sendbufidx, RPCAP_NETBUF_SIZE, SOCKBUF_CHECKONLY, fp->errbuf, PCAP_ERRBUF_SIZE) == -1)
+		&sendbufidx, RPCAP_NETBUF_SIZE, SOCKBUF_CHECKONLY, pcap_geterr(fp->fp), PCAP_ERRBUF_SIZE) == -1)
 		goto error;
 
 	rpcap_createhdr( (struct rpcap_header *) sendbuf, RPCAP_MSG_STATS_REPLY, 0, (uint16) sizeof(struct rpcap_stats));
@@ -1361,25 +1401,25 @@ struct rpcap_stats *netstats;		// statistics sent on the network
 	netstats= (struct rpcap_stats *) &sendbuf[sendbufidx];
 
 	if ( sock_bufferize(NULL, sizeof(struct rpcap_stats), NULL,
-		&sendbufidx, RPCAP_NETBUF_SIZE, SOCKBUF_CHECKONLY, fp->errbuf, PCAP_ERRBUF_SIZE) == -1)
+		&sendbufidx, RPCAP_NETBUF_SIZE, SOCKBUF_CHECKONLY, pcap_geterr(fp->fp), PCAP_ERRBUF_SIZE) == -1)
 		goto error;
 
-	if (pcap_stats(fp, &stats) )
+	if (pcap_stats(fp->fp, &stats) )
 		goto error;
 
 	netstats->ifdrop= htonl(stats.ps_ifdrop);
 	netstats->ifrecv= htonl(stats.ps_recv);
 	netstats->krnldrop= htonl(stats.ps_drop);
-	netstats->svrcapt= htonl(fp->md.TotCapt);
+	netstats->svrcapt= htonl(fp->TotCapt);
 
 	// Send the packet
-	if ( sock_send(fp->rmt_sockctrl, sendbuf, sendbufidx, fp->errbuf, PCAP_ERRBUF_SIZE) == -1)
+	if ( sock_send(fp->rmt_sockctrl, sendbuf, sendbufidx, pcap_geterr(fp->fp), PCAP_ERRBUF_SIZE) == -1)
 		goto error;
 
 	return 0;
 
 error:
-	rpcap_senderror(fp->rmt_sockctrl, fp->errbuf, PCAP_ERR_GETSTATS, NULL);
+	rpcap_senderror(fp->rmt_sockctrl, pcap_geterr(fp->fp), PCAP_ERR_GETSTATS, NULL);
 	return -1;
 }
 
@@ -1427,7 +1467,7 @@ error:
 void *daemon_thrdatamain(void *ptr)
 {
 char errbuf[PCAP_ERRBUF_SIZE + 1];	// error buffer
-pcap_t *fp;							// pointer to a 'pcap' structure
+struct daemon_ctx *fp;							// pointer to a 'pcap' structure
 int retval;							// general variable used to keep the return value of other functions
 struct rpcap_pkthdr *net_pkt_header;// header of the packet
 struct pcap_pkthdr *pkt_header;		// pointer to the buffer that contains the header of the current packet
@@ -1435,9 +1475,9 @@ u_char *pkt_data;					// pointer to the buffer that contains the current packet
 char *sendbuf;						// temporary buffer in which data to be sent is buffered
 int sendbufidx;						// index which keeps the number of bytes currently buffered
 
-	fp= (pcap_t *) ptr;
+	fp= (struct daemon_ctx *) ptr;
 
-	fp->md.TotCapt= 0;			// counter which is incremented each time a packet is received
+	fp->TotCapt= 0;			// counter which is incremented each time a packet is received
 
 	// Initialize errbuf
 	memset(errbuf, 0, sizeof(errbuf) );
@@ -1458,7 +1498,7 @@ int sendbufidx;						// index which keeps the number of bytes currently buffered
 		goto error;
 
 	// Retrieve the packets
-	while ((retval = pcap_next_ex(fp, &pkt_header, (const u_char **) &pkt_data)) >= 0)	// cast to avoid a compiler warning
+	while ((retval = pcap_next_ex(fp->fp, &pkt_header, (const u_char **) &pkt_data)) >= 0)	// cast to avoid a compiler warning
 	{
 		if (retval == 0)	// Read timeout elapsed
 			continue;
@@ -1482,7 +1522,7 @@ int sendbufidx;						// index which keeps the number of bytes currently buffered
 
 		net_pkt_header->caplen= htonl(pkt_header->caplen);
 		net_pkt_header->len= htonl(pkt_header->len);
-		net_pkt_header->npkt= htonl( ++(fp->md.TotCapt) );
+		net_pkt_header->npkt= htonl( ++(fp->TotCapt) );
 		net_pkt_header->timestamp_sec= htonl(pkt_header->ts.tv_sec);
 		net_pkt_header->timestamp_usec= htonl(pkt_header->ts.tv_usec);
 
@@ -1499,7 +1539,7 @@ int sendbufidx;						// index which keeps the number of bytes currently buffered
 
 	if (retval == -1)
 	{
-		snprintf(errbuf, PCAP_ERRBUF_SIZE, "Error reading the packets: %s", pcap_geterr(fp) );
+		snprintf(errbuf, PCAP_ERRBUF_SIZE, "Error reading the packets: %s", pcap_geterr(fp->fp) );
 		rpcap_senderror(fp->rmt_sockctrl, errbuf, PCAP_ERR_READEX, NULL);
 		goto error;
 	}
