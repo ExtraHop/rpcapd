@@ -47,8 +47,19 @@
 #endif
 
 #ifdef linux
+#include <fcntl.h>
 #include <shadow.h>		// for password management
 #include <linux/if_packet.h>
+
+
+static int
+set_non_blocking(int fd)
+{
+    int flags = fcntl(fd, F_GETFL);
+    flags |= O_NONBLOCK;
+    return fcntl(fd, F_SETFL, flags);
+}
+
 #endif
 
 
@@ -66,6 +77,12 @@ struct daemon_ctx {
     char *currentfilter;        //!< Pointer to a buffer (allocated at run-time) that stores the current filter. Needed when flag PCAP_OPENFLAG_NOCAPTURE_RPCAP is turned on.
 
     unsigned int TotCapt;
+    unsigned int eagain_pkts;
+    unsigned int read_timeouts;
+
+    int cb_rc;
+    char *sendbuf;
+    char *errbuf;
 };
 
 static struct daemon_ctx *
@@ -1416,9 +1433,15 @@ struct rpcap_stats *netstats;		// statistics sent on the network
 	netstats->krnldrop= htonl(stats.ps_drop);
 	netstats->svrcapt= htonl(fp->TotCapt);
 
+	printf("ifdrop=%u ifrecv=%u krnldrop=%u svrcapt=%u"
+	       " eagain_pkts=%u read_timeouts=%u\n", stats.ps_ifdrop,
+	       stats.ps_recv, stats.ps_drop, fp->TotCapt, fp->eagain_pkts,
+	       fp->read_timeouts);
+
 	// Send the packet
 	if ( sock_send(fp->rmt_sockctrl, sendbuf, sendbufidx, pcap_geterr(fp->fp), PCAP_ERRBUF_SIZE) == -1)
 		goto error;
+
 
 	return 0;
 
@@ -1467,6 +1490,55 @@ error:
 
 
 
+static void
+daemon_pkt_cb(u_char *usr, const struct pcap_pkthdr *pkt_header, const u_char *pkt_data)
+{
+    struct rpcap_pkthdr *net_pkt_header;
+    struct daemon_ctx *fp = (struct daemon_ctx *)usr;
+    char *sendbuf = fp->sendbuf;
+    char *errbuf = fp->errbuf;
+
+    int sendbufidx= 0;
+
+    // Bufferize the general header
+    if ( sock_bufferize(NULL, sizeof(struct rpcap_header), NULL, &sendbufidx,
+        RPCAP_NETBUF_SIZE, SOCKBUF_CHECKONLY, errbuf, PCAP_ERRBUF_SIZE) == -1)
+        goto error;
+
+    rpcap_createhdr( (struct rpcap_header *) sendbuf, RPCAP_MSG_PACKET, 0,
+        (uint16) (sizeof(struct rpcap_pkthdr) + pkt_header->caplen) );
+
+    net_pkt_header= (struct rpcap_pkthdr *) &sendbuf[sendbufidx];
+
+    // Bufferize the pkt header
+    if ( sock_bufferize(NULL, sizeof(struct rpcap_pkthdr), NULL, &sendbufidx,
+        RPCAP_NETBUF_SIZE, SOCKBUF_CHECKONLY, errbuf, PCAP_ERRBUF_SIZE) == -1)
+        goto error;
+
+    net_pkt_header->caplen= htonl(pkt_header->caplen);
+    net_pkt_header->len= htonl(pkt_header->len);
+    net_pkt_header->npkt= htonl( ++(fp->TotCapt) );
+    net_pkt_header->timestamp_sec= htonl(pkt_header->ts.tv_sec);
+    net_pkt_header->timestamp_usec= htonl(pkt_header->ts.tv_usec);
+
+    // Bufferize the pkt data
+    if ( sock_bufferize((char *) pkt_data, pkt_header->caplen, sendbuf, &sendbufidx,
+        RPCAP_NETBUF_SIZE, SOCKBUF_BUFFERIZE, errbuf, PCAP_ERRBUF_SIZE) == -1)
+        goto error;
+
+    // Send the packet
+    if ( sock_send(fp->rmt_sockdata, sendbuf, sendbufidx, errbuf, PCAP_ERRBUF_SIZE) == -1) {
+        if (errno == EAGAIN) {
+            fp->eagain_pkts++;
+        }
+        else {
+            goto error;
+        }
+    }
+    return;
+ error:
+    fp->cb_rc = -1;
+}
 
 void *daemon_thrdatamain(void *ptr)
 {
@@ -1478,6 +1550,7 @@ struct pcap_pkthdr *pkt_header;		// pointer to the buffer that contains the head
 u_char *pkt_data;					// pointer to the buffer that contains the current packet
 char *sendbuf;						// temporary buffer in which data to be sent is buffered
 int sendbufidx;						// index which keeps the number of bytes currently buffered
+int largest_retval = 0;
 
 	fp= (struct daemon_ctx *) ptr;
 
@@ -1485,6 +1558,7 @@ int sendbufidx;						// index which keeps the number of bytes currently buffered
 
 	// Initialize errbuf
 	memset(errbuf, 0, sizeof(errbuf) );
+	fp->errbuf = errbuf;
 
 	// Some platforms (e.g. Win32) allow creating a static variable with this size
 	// However, others (e.g. BSD) do not, so we're forced to allocate this buffer dynamically
@@ -1494,6 +1568,7 @@ int sendbufidx;						// index which keeps the number of bytes currently buffered
 		snprintf(errbuf, sizeof(errbuf) - 1, "Unable to create the buffer for this child thread");
 		goto error;
 	}
+	fp->sendbuf = sendbuf;
 
 	// Modify thread params so that it can be killed at any time
 	if (pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL) )
@@ -1501,44 +1576,33 @@ int sendbufidx;						// index which keeps the number of bytes currently buffered
 	if (pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL) )
 		goto error;
 
+	// set udp send socket as nonblocking
+	if (set_non_blocking(fp->rmt_sockdata) < 0) {
+	    perror("set_non_blocking failed");
+	}
+	// set the udp outbound length to very large
+	int udp_pkt_sndbuf = 64 * 1024 * 1024;
+	printf("setting udp pkt sndbuf to %d bytes\n", udp_pkt_sndbuf);
+	if (setsockopt(fp->rmt_sockdata, SOL_SOCKET, SO_SNDBUF,
+	               (char *)&udp_pkt_sndbuf, sizeof(int)) < 0) {
+	    perror("setsockopt(SO_SNDBUF) failed");
+	}
+
 	// Retrieve the packets
-	while ((retval = pcap_next_ex(fp->fp, &pkt_header, (const u_char **) &pkt_data)) >= 0)	// cast to avoid a compiler warning
+	while ((retval = pcap_dispatch(fp->fp, 1000000, daemon_pkt_cb,
+	                               (u_char *)fp)) >= 0)
 	{
-		if (retval == 0)	// Read timeout elapsed
+		if (retval == 0) {	// Read timeout elapsed
+		    fp->read_timeouts++;
 			continue;
-
-		sendbufidx= 0;
-
-		// Bufferize the general header
-		if ( sock_bufferize(NULL, sizeof(struct rpcap_header), NULL, &sendbufidx,
-			RPCAP_NETBUF_SIZE, SOCKBUF_CHECKONLY, errbuf, PCAP_ERRBUF_SIZE) == -1)
-			goto error;
-
-		rpcap_createhdr( (struct rpcap_header *) sendbuf, RPCAP_MSG_PACKET, 0,
-			(uint16) (sizeof(struct rpcap_pkthdr) + pkt_header->caplen) );
-
-		net_pkt_header= (struct rpcap_pkthdr *) &sendbuf[sendbufidx];
-
-		// Bufferize the pkt header
-		if ( sock_bufferize(NULL, sizeof(struct rpcap_pkthdr), NULL, &sendbufidx,
-			RPCAP_NETBUF_SIZE, SOCKBUF_CHECKONLY, errbuf, PCAP_ERRBUF_SIZE) == -1)
-			goto error;
-
-		net_pkt_header->caplen= htonl(pkt_header->caplen);
-		net_pkt_header->len= htonl(pkt_header->len);
-		net_pkt_header->npkt= htonl( ++(fp->TotCapt) );
-		net_pkt_header->timestamp_sec= htonl(pkt_header->ts.tv_sec);
-		net_pkt_header->timestamp_usec= htonl(pkt_header->ts.tv_usec);
-
-		// Bufferize the pkt data
-		if ( sock_bufferize((char *) pkt_data, pkt_header->caplen, sendbuf, &sendbufidx,
-			RPCAP_NETBUF_SIZE, SOCKBUF_BUFFERIZE, errbuf, PCAP_ERRBUF_SIZE) == -1)
-			goto error;
-
-		// Send the packet
-		if ( sock_send(fp->rmt_sockdata, sendbuf, sendbufidx, errbuf, PCAP_ERRBUF_SIZE) == -1)
-			goto error;
-
+		}
+		if (retval > largest_retval) {
+		    largest_retval = retval;
+		    printf("retval=%d\n", retval);
+		}
+		if (fp->cb_rc < 0) {
+		    goto error;
+		}
 	}
 
 	if (retval == -1)

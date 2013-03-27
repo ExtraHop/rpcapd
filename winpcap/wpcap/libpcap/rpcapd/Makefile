@@ -8,7 +8,7 @@ CFLAGS  = -pthread -DHAVE_REMOTE -DHAVE_SNPRINTF
 
 INCLUDE = -I../
 
-LIB	= -lpcap -lcrypt
+LIB	= -lpcap -lcrypt -static
 #Solaris: add '-lsocket'
 
 LIBPATH	= -L../
