@@ -1488,7 +1488,7 @@ error:
 	return -1;
 }
 
-
+#define RPCAP_NETBUF_MAX_SIZE   65536
 
 static void
 daemon_pkt_cb(u_char *usr, const struct pcap_pkthdr *pkt_header, const u_char *pkt_data)
@@ -1502,7 +1502,7 @@ daemon_pkt_cb(u_char *usr, const struct pcap_pkthdr *pkt_header, const u_char *p
 
     // Bufferize the general header
     if ( sock_bufferize(NULL, sizeof(struct rpcap_header), NULL, &sendbufidx,
-        RPCAP_NETBUF_SIZE, SOCKBUF_CHECKONLY, errbuf, PCAP_ERRBUF_SIZE) == -1)
+        RPCAP_NETBUF_MAX_SIZE, SOCKBUF_CHECKONLY, errbuf, PCAP_ERRBUF_SIZE) == -1)
         goto error;
 
     rpcap_createhdr( (struct rpcap_header *) sendbuf, RPCAP_MSG_PACKET, 0,
@@ -1512,7 +1512,7 @@ daemon_pkt_cb(u_char *usr, const struct pcap_pkthdr *pkt_header, const u_char *p
 
     // Bufferize the pkt header
     if ( sock_bufferize(NULL, sizeof(struct rpcap_pkthdr), NULL, &sendbufidx,
-        RPCAP_NETBUF_SIZE, SOCKBUF_CHECKONLY, errbuf, PCAP_ERRBUF_SIZE) == -1)
+        RPCAP_NETBUF_MAX_SIZE, SOCKBUF_CHECKONLY, errbuf, PCAP_ERRBUF_SIZE) == -1)
         goto error;
 
     net_pkt_header->caplen= htonl(pkt_header->caplen);
@@ -1523,7 +1523,7 @@ daemon_pkt_cb(u_char *usr, const struct pcap_pkthdr *pkt_header, const u_char *p
 
     // Bufferize the pkt data
     if ( sock_bufferize((char *) pkt_data, pkt_header->caplen, sendbuf, &sendbufidx,
-        RPCAP_NETBUF_SIZE, SOCKBUF_BUFFERIZE, errbuf, PCAP_ERRBUF_SIZE) == -1)
+        RPCAP_NETBUF_MAX_SIZE, SOCKBUF_BUFFERIZE, errbuf, PCAP_ERRBUF_SIZE) == -1)
         goto error;
 
     // Send the packet
@@ -1562,7 +1562,7 @@ int largest_retval = 0;
 
 	// Some platforms (e.g. Win32) allow creating a static variable with this size
 	// However, others (e.g. BSD) do not, so we're forced to allocate this buffer dynamically
-	sendbuf= (char *) malloc (sizeof(char) * RPCAP_NETBUF_SIZE);
+	sendbuf= (char *) malloc (sizeof(char) * RPCAP_NETBUF_MAX_SIZE);
 	if (sendbuf == NULL)
 	{
 		snprintf(errbuf, sizeof(errbuf) - 1, "Unable to create the buffer for this child thread");
