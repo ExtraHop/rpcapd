@@ -47,19 +47,8 @@
 #endif
 
 #ifdef linux
-#include <fcntl.h>
 #include <shadow.h>		// for password management
 #include <linux/if_packet.h>
-
-
-static int
-set_non_blocking(int fd)
-{
-    int flags = fcntl(fd, F_GETFL);
-    flags |= O_NONBLOCK;
-    return fcntl(fd, F_SETFL, flags);
-}
-
 #endif
 
 
@@ -1582,10 +1571,6 @@ int largest_retval = 0;
 	if (pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL) )
 		goto error;
 
-	// set udp send socket as nonblocking
-	if (set_non_blocking(fp->rmt_sockdata) < 0) {
-	    perror("set_non_blocking failed");
-	}
 	// set the udp outbound length to very large
 	int udp_pkt_sndbuf = 64 * 1024 * 1024;
 	printf("setting udp pkt sndbuf to %d bytes\n", udp_pkt_sndbuf);
