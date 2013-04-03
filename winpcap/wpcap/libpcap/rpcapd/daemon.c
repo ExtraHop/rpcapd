@@ -1493,6 +1493,7 @@ error:
 static void
 daemon_pkt_cb(u_char *usr, const struct pcap_pkthdr *pkt_header, const u_char *pkt_data)
 {
+    static int largest_caplen;
     struct rpcap_pkthdr *net_pkt_header;
     struct daemon_ctx *fp = (struct daemon_ctx *)usr;
     char *sendbuf = fp->sendbuf;
@@ -1520,6 +1521,11 @@ daemon_pkt_cb(u_char *usr, const struct pcap_pkthdr *pkt_header, const u_char *p
     net_pkt_header->npkt= htonl( ++(fp->TotCapt) );
     net_pkt_header->timestamp_sec= htonl(pkt_header->ts.tv_sec);
     net_pkt_header->timestamp_usec= htonl(pkt_header->ts.tv_usec);
+
+    if (pkt_header->caplen > largest_caplen) {
+        largest_caplen = pkt_header->caplen;
+        printf("largest_caplen=%d\n", largest_caplen);
+    }
 
     // Bufferize the pkt data
     if ( sock_bufferize((char *) pkt_data, pkt_header->caplen, sendbuf, &sendbufidx,
