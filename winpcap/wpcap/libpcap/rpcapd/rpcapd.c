@@ -153,7 +153,7 @@ int k;
 	mainhints.ai_socktype = SOCK_STREAM;
 
 	// Getting the proper command line options
-	while ((retval = getopt(argc, argv, "b:dhp:4l:na:s:f:vk:m:")) != -1)
+	while ((retval = getopt(argc, argv, "b:dhp:4l:na:s:f:vk:m:u:")) != -1)
 	{
 		switch (retval)
 		{
