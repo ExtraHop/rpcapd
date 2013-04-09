@@ -65,6 +65,7 @@ int passivemode= 1;						//!< '1' if we want to run in passive mode as well
 struct addrinfo mainhints;				//!< temporary struct to keep settings needed to open the new socket
 char address[MAX_LINE + 1];				//!< keeps the network address (either numeric or literal) to bind to
 char port[MAX_LINE + 1];				//!< keeps the network port to bind to
+struct rpcapd_opt rpcapd_opt;
 
 extern char *optarg;	// for getopt()
 
@@ -108,6 +109,8 @@ void printusage()
 	"  -s <file>: save the current configuration to file\n"
  	"  -f <file>: load the current configuration from file; all the switches\n"
   	"      specified from the command line are ignored\n"
+	"  -m <size of pkt data buffer in MB>\n"
+	"  -k <npkts, must be power of 2>\n"
     "  -h: print this help screen\n\n";
 
 	printf(usagetext);
@@ -122,6 +125,7 @@ char savefile[MAX_LINE + 1];		// name of the file on which we have to save the c
 int isdaemon= 0;					// Not null if the user wants to run this program as a daemon
 int retval;							// keeps the returning value from several functions
 char errbuf[PCAP_ERRBUF_SIZE + 1];	// keeps the error string, prior to be printed
+int k;
 
 
 	savefile[0]= 0;
@@ -148,7 +152,7 @@ char errbuf[PCAP_ERRBUF_SIZE + 1];	// keeps the error string, prior to be printe
 	mainhints.ai_socktype = SOCK_STREAM;
 
 	// Getting the proper command line options
-	while ((retval = getopt(argc, argv, "b:dhp:4l:na:s:f:v")) != -1)
+	while ((retval = getopt(argc, argv, "b:dhp:4l:na:s:f:vk:m:")) != -1)
 	{
 		switch (retval)
 		{
@@ -211,6 +215,23 @@ char errbuf[PCAP_ERRBUF_SIZE + 1];	// keeps the error string, prior to be printe
 			case 's':
 				strncpy(savefile, optarg, MAX_LINE);
 				break;
+			case 'm':
+			    rpcapd_opt.ringbuf_max_pkt_data = atoi(optarg) * 1000 * 1000;
+				if (rpcapd_opt.ringbuf_max_pkt_data <= 0) {
+					printf("ignoring invalid ringbuf memory size\n");
+				}
+			    break;
+			case 'k':
+			    k = atoi(optarg);
+			    if (k <= 0) {
+			        printf("ignoring invalid ringbuf pkt count\n");
+			        break;
+			    }
+			    rpcapd_opt.ringbuf_max_pkts = 1;
+			    while (rpcapd_opt.ringbuf_max_pkts < k) {
+			        rpcapd_opt.ringbuf_max_pkts <<= 1;
+			    }
+			    break;
 			case 'h':
 				printusage();
 				exit(0);

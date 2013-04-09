@@ -48,6 +48,12 @@ struct active_pars
 	int ai_family;					// address faimly to use
 };
 
+struct rpcapd_opt {
+    int ringbuf_max_pkt_data;
+    int ringbuf_max_pkts;
+};
+
+extern struct rpcapd_opt rpcapd_opt;
 
 void main_startup(void);
 void main_cleanup(int sign);
