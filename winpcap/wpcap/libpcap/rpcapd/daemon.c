@@ -1838,7 +1838,15 @@ int sendthread_started = 0;
 	// set the udp outbound length to very large
 	printf("setting udp pkt sndbuf to %d bytes\n",
 	       rpcapd_opt.ringbuf_max_pkt_data);
-	if (setsockopt(fp->rmt_sockdata, SOL_SOCKET, SO_SNDBUF,
+#ifdef SO_SNDBUFFORCE
+#define DAEMON_SO_SNDBUF    SO_SNDBUFFORCE
+#else
+#define DAEMON_SO_SNDBUF    SO_SNDBUF
+    printf("SO_SNDBUFFORCE does not exist on this kernel, adjust manually:\n")
+	printf("  $ sudo -i\n");
+	printf("  $ echo 8388608 > /proc/sys/net/core/wmem_max\n");
+#endif
+	if (setsockopt(fp->rmt_sockdata, SOL_SOCKET, DAEMON_SO_SNDBUF,
 	               (char *)&rpcapd_opt.ringbuf_max_pkt_data, sizeof(int)) < 0) {
 	    perror("setsockopt(SO_SNDBUF) failed");
 	}
