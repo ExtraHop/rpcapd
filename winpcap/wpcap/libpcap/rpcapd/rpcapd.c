@@ -111,6 +111,7 @@ void printusage()
   	"      specified from the command line are ignored\n"
 	"  -m <size of pkt data buffer in MB>\n"
 	"  -k <npkts, must be power of 2>\n"
+	"  -u <udp sndbuf size>\n"
     "  -h: print this help screen\n\n";
 
 	printf(usagetext);
@@ -230,6 +231,12 @@ int k;
 			    rpcapd_opt.ringbuf_max_pkts = 1;
 			    while (rpcapd_opt.ringbuf_max_pkts < k) {
 			        rpcapd_opt.ringbuf_max_pkts <<= 1;
+			    }
+			    break;
+			case 'u':
+			    rpcapd_opt.udp_sndbuf_size = atoi(optarg);
+			    if (rpcapd_opt.udp_sndbuf_size <= 0) {
+					printf("ignoring invalid udp sndbuf size\n");
 			    }
 			    break;
 			case 'h':

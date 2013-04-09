@@ -1835,9 +1835,11 @@ int sendthread_started = 0;
 	if (pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL) )
 		goto error;
 
-	// set the udp outbound length to very large
+	if (rpcapd_opt.udp_sndbuf_size < 16384) {
+	    rpcapd_opt.udp_sndbuf_size = 8388608;
+	}
 	printf("setting udp pkt sndbuf to %d bytes\n",
-	       rpcapd_opt.ringbuf_max_pkt_data);
+	       rpcapd_opt.udp_sndbuf_size);
 #ifdef SO_SNDBUFFORCE
 #define DAEMON_SO_SNDBUF    SO_SNDBUFFORCE
 #else
@@ -1847,7 +1849,7 @@ int sendthread_started = 0;
 	printf("  $ echo 8388608 > /proc/sys/net/core/wmem_max\n");
 #endif
 	if (setsockopt(fp->rmt_sockdata, SOL_SOCKET, DAEMON_SO_SNDBUF,
-	               (char *)&rpcapd_opt.ringbuf_max_pkt_data, sizeof(int)) < 0) {
+	               (char *)&rpcapd_opt.udp_sndbuf_size, sizeof(int)) < 0) {
 	    perror("setsockopt(SO_SNDBUF) failed");
 	}
 	int sndbuf = 0;
