@@ -61,6 +61,20 @@ set_non_blocking(int fd)
 }
 #endif
 
+struct daemon_ctx_stats {
+    unsigned int TotCapt;
+    unsigned int svrcapt;
+    unsigned int svrbytes;
+    unsigned int eagain_pkts;
+    unsigned int eagain_sleep;
+    unsigned int read_timeouts;
+    unsigned int sendring_full;
+    unsigned int sendring_buf_full;
+    unsigned int sendring_full_sleep;
+    unsigned int sendring_buf_full_sleep;
+    unsigned int sendthr_sleep;
+};
+
 struct daemon_ctx {
     pcap_t *fp;
     /*! \brief '1' if we're the network client; needed by several functions (like pcap_setfilter() ) to know if
@@ -74,16 +88,9 @@ struct daemon_ctx {
     struct pcap_samp rmt_samp;  //!< Keeps the parameters related to the sampling process.
     char *currentfilter;        //!< Pointer to a buffer (allocated at run-time) that stores the current filter. Needed when flag PCAP_OPENFLAG_NOCAPTURE_RPCAP is turned on.
 
-    unsigned int TotCapt;
-    unsigned int svrcapt;
-    unsigned int eagain_pkts;
-    unsigned int eagain_sleep;
-    unsigned int read_timeouts;
-    unsigned int sendring_full;
-    unsigned int sendring_buf_full;
-    unsigned int sendring_full_sleep;
-    unsigned int sendring_buf_full_sleep;
-    unsigned int sendthr_sleep;
+    struct daemon_ctx_stats ds;
+    struct daemon_ctx_stats prev_ds;
+    struct pcap_stat prev_ps;
 
     int cb_rc;
     char *sendbuf;
@@ -475,7 +482,7 @@ auth_again:
 						ifdrops= stats.ps_ifdrop;
 						ifrecv= stats.ps_recv;
 						krnldrop= stats.ps_drop;
-						svrcapt= fp->TotCapt;
+						svrcapt= fp->ds.TotCapt;
 					}
 					else
 						ifdrops= ifrecv= krnldrop= svrcapt= 0;
@@ -1491,16 +1498,33 @@ struct rpcap_stats *netstats;		// statistics sent on the network
 	netstats->ifdrop= htonl(stats.ps_ifdrop);
 	netstats->ifrecv= htonl(stats.ps_recv);
 	netstats->krnldrop= htonl(stats.ps_drop);
-	netstats->svrcapt= htonl(fp->svrcapt);
+	netstats->svrcapt= htonl(fp->ds.svrcapt);
 
-	printf("ifdrop=%u ifrecv=%u krnldrop=%u TotCapt=%u\n",
-	       stats.ps_ifdrop, stats.ps_recv, stats.ps_drop, fp->TotCapt);
+	struct daemon_ctx_stats ds = fp->ds;
+
+	printf("ifdrop=%u (%u) ifrecv=%u (%u) krnldrop=%u %u%% (%u %u%%)"
+	       " TotCapt=%u (%u)\n",
+	       (stats.ps_ifdrop - fp->prev_ps.ps_ifdrop), stats.ps_ifdrop,
+	       (stats.ps_recv - fp->prev_ps.ps_recv), stats.ps_recv,
+	       (stats.ps_drop - fp->prev_ps.ps_drop),
+	       ((stats.ps_recv - fp->prev_ps.ps_recv) == 0) ? 0 :
+	               ((stats.ps_drop - fp->prev_ps.ps_drop) * 100) /
+	                       (stats.ps_recv - fp->prev_ps.ps_recv),
+	       stats.ps_drop,
+	       (stats.ps_recv == 0) ? 0 :
+	               (stats.ps_drop * 100) / stats.ps_recv,
+	       (ds.TotCapt - fp->prev_ds.TotCapt), ds.TotCapt);
 	printf("    sendring_full=%u (%u sleep) sendring_buf_full=%u (%u sleep)\n",
-	       fp->sendring_full, fp->sendring_full_sleep,
-	       fp->sendring_buf_full, fp->sendring_buf_full_sleep);
-	printf("svrcapt=%u eagain=%u (%u sleep) sleep=%u read_timeouts=%u\n",
-	       fp->svrcapt, fp->eagain_pkts, fp->eagain_sleep, fp->sendthr_sleep,
-           fp->read_timeouts);
+	       ds.sendring_full, ds.sendring_full_sleep,
+	       ds.sendring_buf_full, ds.sendring_buf_full_sleep);
+	printf("svrcapt=%u (%u) svrbytes=%u (%u) eagain=%u (%u sleep)"
+	       " sleep=%u read_timeouts=%u\n",
+	       (ds.svrcapt - fp->prev_ds.svrcapt), ds.svrcapt,
+	       (ds.svrbytes - fp->prev_ds.svrbytes), ds.svrbytes,
+	       ds.eagain_pkts, ds.eagain_sleep,
+	       ds.sendthr_sleep, ds.read_timeouts);
+	fp->prev_ds = ds;
+	fp->prev_ps = stats;
 
 	// Send the packet
 	if ( sock_send(fp->rmt_sockctrl, sendbuf, sendbufidx, pcap_geterr(fp->fp), PCAP_ERRBUF_SIZE) == -1)
@@ -1553,6 +1577,7 @@ error:
 }
 
 #define RPCAP_NETBUF_MAX_SIZE   65536
+#define DAEMON_USE_COND_TIMEDWAIT   0
 
 #define rmb()   asm volatile("lfence":::"memory")
 #define wmb()   asm volatile("sfence":::"memory")
@@ -1617,10 +1642,10 @@ daemon_pkt_cb(u_char *usr, const struct pcap_pkthdr *pkt_header, const u_char *p
     if (rctx->tail_nbytes + nbytes - rctx->head_nbytes > daemon_ringbuf_len) {
         pthread_cond_signal(&rctx->send_cv);
         if (--sleep_budget == 0) {
-            fp->sendring_buf_full++;
+            fp->ds.sendring_buf_full++;
             return;
         }
-        fp->sendring_buf_full_sleep++;
+        fp->ds.sendring_buf_full_sleep++;
         usleep(1 * 1000);
         goto again;
     }
@@ -1628,10 +1653,10 @@ daemon_pkt_cb(u_char *usr, const struct pcap_pkthdr *pkt_header, const u_char *p
     if (new_tail == rctx->head) {
         pthread_cond_signal(&rctx->send_cv);
         if (--sleep_budget == 0) {
-            fp->sendring_full++;
+            fp->ds.sendring_full++;
             return;
         }
-        fp->sendring_full_sleep++;
+        fp->ds.sendring_full_sleep++;
         usleep(1 * 1000);
         goto again;
     }
@@ -1650,7 +1675,7 @@ daemon_pkt_cb(u_char *usr, const struct pcap_pkthdr *pkt_header, const u_char *p
 
     net_pkt_header->caplen= htonl(caplen);
     net_pkt_header->len= htonl(pkt_header->len);
-    net_pkt_header->npkt= htonl( ++(fp->TotCapt) );
+    net_pkt_header->npkt= htonl( ++(fp->ds.TotCapt) );
     net_pkt_header->timestamp_sec= htonl(pkt_header->ts.tv_sec);
     net_pkt_header->timestamp_usec= htonl(pkt_header->ts.tv_usec);
 
@@ -1666,39 +1691,81 @@ daemon_pkt_cb(u_char *usr, const struct pcap_pkthdr *pkt_header, const u_char *p
     rctx->tail_bufidx = tail_bufidx;
     wmb();
     rctx->tail = new_tail;
-
+#if DAEMON_USE_COND_TIMEDWAIT
     if (--rctx->tail_signal == 0) {
-        rctx->tail_signal = 16384;
+        rctx->tail_signal = rpcapd_opt.ringbuf_max_pkts / 2;
         pthread_cond_signal(&rctx->send_cv);
     }
+#endif
     return;
 }
 
-static void daemon_sendentry(struct daemon_ctx *fp, char *errbuf,
-                             unsigned int bufidx, unsigned int len)
+static void
+daemon_sendentry(struct daemon_ctx *fp, char *errbuf,
+                 const char *buf, unsigned int len)
 {
-    char *buf = &daemon_ringbuf[bufidx];
     int sleep_budget = 10;
+    ssize_t wlen;
  again:
-    if ( sock_send(fp->rmt_sockdata, buf, len, errbuf, PCAP_ERRBUF_SIZE) == -1) {
+    wlen = send(fp->rmt_sockdata, buf, len, 0);
+    if (wlen != len) {
         if (errno == EAGAIN) {
             if (--sleep_budget == 0) {
-                fp->eagain_pkts++;
+                fp->ds.eagain_pkts++;
             }
             else {
-                fp->eagain_sleep++;
+                fp->ds.eagain_sleep++;
                 usleep(1 * 1000);
                 goto again;
             }
         }
         else {
+            printf("WARNING: %s: send ret=%zd tried to send len=%u\n",
+                   __func__, wlen, len);
             /* XXX: fp->cb_rc = -1; */
         }
     }
     else {
-        fp->svrcapt++;
+        fp->ds.svrcapt++;
+        fp->ds.svrbytes += len;
     }
 }
+
+#ifdef linux
+#include <sched.h>
+#include <syscall.h>
+#include <sys/resource.h>
+#define gettid() syscall(__NR_gettid)
+
+void
+daemon_set_cpu_and_nice(int cpu, int nice)
+{
+    int rtid = gettid();
+    cpu_set_t csmask;
+
+    CPU_ZERO(&csmask);
+    CPU_SET(cpu, &csmask);
+    printf("attempting sched_setaffinity(%d), cur cpu=%d\n",
+           cpu, sched_getcpu());
+    if (sched_setaffinity(rtid, sizeof(cpu_set_t), &csmask) != 0) {
+        perror("WARNING: sched_setaffinity() failed");
+    }
+    printf("    now cpu=%d\n", sched_getcpu());
+    printf("attempting setpriority(%d)\n", nice);
+    if (setpriority(PRIO_PROCESS, rtid, nice) != 0) {
+        perror("WARNING: setpriority() failed");
+    }
+}
+#else
+
+void
+daemon_set_cpu_and_nice(int cpu, int nice)
+{
+    printf("WARNING: %s(cpu=%d, nice=%d) not implemented on this platform\n",
+           __func__, cpu, nice);
+}
+
+#endif
 
 void *daemon_sendthread_fn(void *ptr)
 {
@@ -1709,6 +1776,8 @@ struct daemon_pkt_entry *entry;
 unsigned int idx, endidx;
 unsigned int head_bufidx;
 unsigned int nbytes;
+
+    daemon_set_cpu_and_nice(0, 10);
 
     // Initialize errbuf
     memset(errbuf, 0, sizeof(errbuf) );
@@ -1741,7 +1810,8 @@ unsigned int nbytes;
                 exit(1);
             }
             nbytes += entry->len;
-            daemon_sendentry(fp, errbuf, entry->buf_idx, entry->len);
+            daemon_sendentry(fp, errbuf, &daemon_ringbuf[entry->buf_idx],
+                             entry->len);
             head_bufidx = entry->buf_idx + entry->len;
             idx = (idx + 1) & daemon_ring_mask;
         }
@@ -1750,6 +1820,7 @@ unsigned int nbytes;
         rctx->head_nbytes += nbytes;
 
         if (idx == rctx->tail) {
+#if DAEMON_USE_COND_TIMEDWAIT
             pthread_mutex_lock(&rctx->send_lock);
             if (idx == rctx->tail) {
                 struct timeval now;
@@ -1760,10 +1831,14 @@ unsigned int nbytes;
                     timeout.tv_nsec = now.tv_usec * 1000;
                     pthread_cond_timedwait(&rctx->send_cv, &rctx->send_lock,
                                            &timeout);
-                    fp->sendthr_sleep++;
+                    fp->ds.sendthr_sleep++;
                 }
             }
             pthread_mutex_unlock(&rctx->send_lock);
+#else
+            usleep(10 * 1000);
+            fp->ds.sendthr_sleep++;
+#endif
         }
     }
 }
@@ -1785,17 +1860,13 @@ int sendthread_started = 0;
 
 	fp= (struct daemon_ctx *) ptr;
 
-
-	fp->TotCapt= 0;			// counter which is incremented each time a packet is received
-	fp->sendring_full = 0;
-	fp->sendring_buf_full = 0;
+	memset(&fp->ds, 0, sizeof(struct daemon_ctx_stats));
 
 	// Initialize errbuf
 	memset(errbuf, 0, sizeof(errbuf) );
 	fp->errbuf = errbuf;
 
 	memset(&daemon_ring_ctx, 0, sizeof(struct daemon_ring_ctx));
-	daemon_ring_ctx.tail_signal = 16384;
 	pthread_mutex_init(&daemon_ring_ctx.send_lock, NULL);
 	pthread_cond_init(&daemon_ring_ctx.send_cv, NULL);
 	daemon_sendthread_done = 0;
@@ -1816,11 +1887,13 @@ int sendthread_started = 0;
 	if (rpcapd_opt.ringbuf_max_pkts < 8) {
 	    rpcapd_opt.ringbuf_max_pkts = 65536;
 	}
+	daemon_ring_ctx.tail_signal = rpcapd_opt.ringbuf_max_pkts / 2;
 	printf("ringbuf_max_pkts=%d pkts\n", rpcapd_opt.ringbuf_max_pkts);
 	daemon_ring = calloc(rpcapd_opt.ringbuf_max_pkts,
 	                     sizeof(struct daemon_pkt_entry));
 	if (daemon_ring == NULL) {
-        snprintf(errbuf, sizeof(errbuf) - 1, "Unable to create ring pkt entries=%u",
+        snprintf(errbuf, sizeof(errbuf) - 1,
+                 "Unable to create ring pkt entries=%u",
                  rpcapd_opt.ringbuf_max_pkts);
         rpcap_senderror(fp->rmt_sockctrl, errbuf, PCAP_ERR_READEX, NULL);
         goto error;
@@ -1850,18 +1923,20 @@ int sendthread_started = 0;
 #endif
 	if (setsockopt(fp->rmt_sockdata, SOL_SOCKET, DAEMON_SO_SNDBUF,
 	               (char *)&rpcapd_opt.udp_sndbuf_size, sizeof(int)) < 0) {
-	    perror("setsockopt(SO_SNDBUF) failed");
+	    perror("WARNING: setsockopt(SO_SNDBUF) failed");
 	}
 	int sndbuf = 0;
 	socklen_t sndbuf_len = sizeof(int);
 	if (getsockopt(fp->rmt_sockdata, SOL_SOCKET, SO_SNDBUF,
                    (char *)&sndbuf, &sndbuf_len) < 0) {
-        perror("getsockopt(SO_SNDBUF) failed");
+        perror("WARNING: getsockopt(SO_SNDBUF) failed");
     }
 	printf("udp pkt sndbuf is set to %d bytes\n", sndbuf);
 	if (set_non_blocking(fp->rmt_sockdata) < 0) {
-	    perror("set_non_blocking(udp sock) failed");
+	    perror("WARNING: set_non_blocking(udp sock) failed");
 	}
+
+	daemon_set_cpu_and_nice(1, -15);
 
 	printf("Starting packet sending thread\n");
     if ( pthread_create(&sendthread, NULL, (void *) daemon_sendthread_fn, (void *) fp) )
@@ -1877,7 +1952,7 @@ int sendthread_started = 0;
 	                               (u_char *)fp)) >= 0)
 	{
 		if (retval == 0) {	// Read timeout elapsed
-		    fp->read_timeouts++;
+		    fp->ds.read_timeouts++;
 			continue;
 		}
 		if (retval > largest_retval) {
