@@ -109,9 +109,13 @@ void printusage()
 	"  -s <file>: save the current configuration to file\n"
  	"  -f <file>: load the current configuration from file; all the switches\n"
   	"      specified from the command line are ignored\n"
-	"  -m <size of pkt data buffer in MB>\n"
-	"  -k <npkts, must be power of 2>\n"
-	"  -u <udp sndbuf size>\n"
+	"  -u <udp socket sndbuf size>\n"
+	"  -g <udp socket blocking instead of non-blocking>\n"
+	"  -c 'single'  -- single threaded mode\n'"
+	"     '1,0'     -- cpu affinity for <pcap thread>,<send thread>\n"
+	"  -e -15,10    -- nice values of <pcap thread>,<send thread>\n"
+	"  -m <for multithreaded mode: ringbuf data buffer in MB>\n"
+	"  -k <for multithreaded mode: ringbuf npkts>\n"
     "  -h: print this help screen\n\n";
 
 	printf(usagetext);
@@ -152,8 +156,13 @@ int k;
 	mainhints.ai_flags = AI_PASSIVE;	// Ready to a bind() socket
 	mainhints.ai_socktype = SOCK_STREAM;
 
+	rpcapd_opt.cpu_affinity_pcap = -1;
+	rpcapd_opt.cpu_affinity_udp = -1;
+	rpcapd_opt.nice_pcap = 1000;
+	rpcapd_opt.nice_udp = 1000;
+
 	// Getting the proper command line options
-	while ((retval = getopt(argc, argv, "b:dhp:4l:na:s:f:vk:m:u:")) != -1)
+	while ((retval = getopt(argc, argv, "b:dhp:4l:na:s:f:vu:gc:e:m:k:")) != -1)
 	{
 		switch (retval)
 		{
@@ -239,6 +248,21 @@ int k;
 					printf("ignoring invalid udp sndbuf size\n");
 			    }
 			    break;
+            case 'g':
+                rpcapd_opt.blocking_udp_socket = 1;
+                break;
+            case 'c':
+                if (strcmp("single", optarg) == 0) {
+                    rpcapd_opt.single_threaded = 1;
+                    break;
+                }
+                scanf("%d,%d", &rpcapd_opt.cpu_affinity_pcap,
+                      &rpcapd_opt.cpu_affinity_udp);
+                break;
+            case 'e':
+                scanf("%d,%d", &rpcapd_opt.nice_pcap,
+                      &rpcapd_opt.nice_udp);
+                break;
 			case 'h':
 				printusage();
 				exit(0);

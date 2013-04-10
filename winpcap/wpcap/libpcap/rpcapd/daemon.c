@@ -45,12 +45,16 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <pwd.h>		// for password management
-#endif
 
-#ifdef linux
+int
+set_non_blocking(int fd)
+{
+    printf("WARNING: %s(fd=%d) not implemented on this platform\n",
+           __func__, fd);
+}
+#else
+
 #include <fcntl.h>
-#include <shadow.h>		// for password management
-#include <linux/if_packet.h>
 
 int
 set_non_blocking(int fd)
@@ -59,20 +63,33 @@ set_non_blocking(int fd)
     flags |= O_NONBLOCK;
     return fcntl(fd, F_SETFL, flags);
 }
+
+#endif
+
+#ifdef linux
+#include <shadow.h>		// for password management
+#include <linux/if_packet.h>
 #endif
 
 struct daemon_ctx_stats {
-    unsigned int TotCapt;
-    unsigned int svrcapt;
-    unsigned int svrbytes;
-    unsigned int eagain_pkts;
-    unsigned int eagain_sleep;
-    unsigned int read_timeouts;
+    unsigned int pcap_dispatched;
+    unsigned int pcap_max_dispatched;
+    unsigned int pcap_max_caplen;
+    unsigned int pcap_read_timeouts;
+
     unsigned int sendring_full;
-    unsigned int sendring_buf_full;
     unsigned int sendring_full_sleep;
+    unsigned int sendring_buf_full;
     unsigned int sendring_buf_full_sleep;
-    unsigned int sendthr_sleep;
+
+    char _padding[32]; /* to prevent false sharing */
+
+    unsigned int udp_pkts;
+    unsigned int udp_bytes;
+    unsigned int udp_eagain;
+    unsigned int udp_eagain_sleep;
+    unsigned int udp_senderr;
+    unsigned int sendring_empty_sleep;
 };
 
 struct daemon_ctx {
@@ -482,7 +499,7 @@ auth_again:
 						ifdrops= stats.ps_ifdrop;
 						ifrecv= stats.ps_recv;
 						krnldrop= stats.ps_drop;
-						svrcapt= fp->ds.TotCapt;
+						svrcapt= fp->ds.pcap_dispatched;
 					}
 					else
 						ifdrops= ifrecv= krnldrop= svrcapt= 0;
@@ -1498,12 +1515,17 @@ struct rpcap_stats *netstats;		// statistics sent on the network
 	netstats->ifdrop= htonl(stats.ps_ifdrop);
 	netstats->ifrecv= htonl(stats.ps_recv);
 	netstats->krnldrop= htonl(stats.ps_drop);
-	netstats->svrcapt= htonl(fp->ds.svrcapt);
+	netstats->svrcapt= htonl(fp->ds.pcap_dispatched);
+
+
+	// Send the packet
+	if ( sock_send(fp->rmt_sockctrl, sendbuf, sendbufidx, pcap_geterr(fp->fp), PCAP_ERRBUF_SIZE) == -1)
+		goto error;
 
 	struct daemon_ctx_stats ds = fp->ds;
 
-	printf("ifdrop=%u (%u) ifrecv=%u (%u) krnldrop=%u %u%% (%u %u%%)"
-	       " TotCapt=%u (%u)\n",
+	printf("ifrecv=%u (%u)\t TotCapt=%u (%u)\t"
+	       " krnldrop=%u %u%% (%u %u%%)\t ifdrop=%u (%u)\n",
 	       (stats.ps_ifdrop - fp->prev_ps.ps_ifdrop), stats.ps_ifdrop,
 	       (stats.ps_recv - fp->prev_ps.ps_recv), stats.ps_recv,
 	       (stats.ps_drop - fp->prev_ps.ps_drop),
@@ -1513,23 +1535,29 @@ struct rpcap_stats *netstats;		// statistics sent on the network
 	       stats.ps_drop,
 	       (stats.ps_recv == 0) ? 0 :
 	               (stats.ps_drop * 100) / stats.ps_recv,
-	       (ds.TotCapt - fp->prev_ds.TotCapt), ds.TotCapt);
-	printf("    sendring_full=%u (%u sleep) sendring_buf_full=%u (%u sleep)\n",
-	       ds.sendring_full, ds.sendring_full_sleep,
-	       ds.sendring_buf_full, ds.sendring_buf_full_sleep);
-	printf("svrcapt=%u (%u) svrbytes=%u (%u) eagain=%u (%u sleep)"
-	       " sleep=%u read_timeouts=%u\n",
-	       (ds.svrcapt - fp->prev_ds.svrcapt), ds.svrcapt,
-	       (ds.svrbytes - fp->prev_ds.svrbytes), ds.svrbytes,
-	       ds.eagain_pkts, ds.eagain_sleep,
-	       ds.sendthr_sleep, ds.read_timeouts);
+	       (ds.pcap_dispatched - fp->prev_ds.pcap_dispatched),
+	       ds.pcap_dispatched);
+	if (!rpcapd_opt.single_threaded) {
+        printf("    sendring_full=%u (%u sleep)\t"
+               " sendring_buf_full=%u (%u sleep)\t"
+               " sendthr empty sleep=%u\n",
+               ds.sendring_full, ds.sendring_full_sleep,
+               ds.sendring_buf_full, ds.sendring_buf_full_sleep,
+               ds.sendring_empty_sleep);
+	}
+	printf("sent=%u (%u)\t sentbytes=%u (%u)\t eagain=%u (%u sleep)\t"
+	       " senderr=%u\n",
+	       (ds.udp_pkts - fp->prev_ds.udp_pkts), ds.udp_pkts,
+	       (ds.udp_bytes - fp->prev_ds.udp_bytes), ds.udp_bytes,
+	       ds.udp_eagain, ds.udp_eagain_sleep,
+	       ds.udp_senderr);
+	printf("    max_dispatch=%u max_caplen=%u read_timeout=%u\n",
+	       ds.pcap_max_dispatched, ds.pcap_max_caplen, ds.pcap_read_timeouts);
+	fp->ds.pcap_max_dispatched = 0;
+	fp->ds.pcap_max_caplen = 0;
+
 	fp->prev_ds = ds;
 	fp->prev_ps = stats;
-
-	// Send the packet
-	if ( sock_send(fp->rmt_sockctrl, sendbuf, sendbufidx, pcap_geterr(fp->fp), PCAP_ERRBUF_SIZE) == -1)
-		goto error;
-
 
 	return 0;
 
@@ -1614,13 +1642,255 @@ struct daemon_ring_ctx {
 };
 static struct daemon_ring_ctx daemon_ring_ctx;
 
-static void
-daemon_pkt_cb(u_char *usr, const struct pcap_pkthdr *pkt_header, const u_char *pkt_data)
+#ifdef linux
+#include <sched.h>
+#include <syscall.h>
+#include <sys/resource.h>
+#define gettid() syscall(__NR_gettid)
+
+void
+daemon_set_cpu(int cpu)
 {
-    static int largest_caplen;
+    int rtid = gettid();
+    cpu_set_t csmask;
+
+    CPU_ZERO(&csmask);
+    CPU_SET(cpu, &csmask);
+    printf("attempting sched_setaffinity(%d), cur cpu=%d\n",
+           cpu, sched_getcpu());
+    if (sched_setaffinity(rtid, sizeof(cpu_set_t), &csmask) != 0) {
+        perror("WARNING: sched_setaffinity() failed");
+    }
+    printf("    now cpu=%d\n", sched_getcpu());
+}
+
+void
+daemon_set_nice(int nice)
+{
+    int rtid = gettid();
+    printf("attempting setpriority(%d)\n", nice);
+    if (setpriority(PRIO_PROCESS, rtid, nice) != 0) {
+        perror("WARNING: setpriority() failed");
+    }
+}
+
+#else
+
+void
+daemon_set_cpu(int cpu)
+{
+    printf("WARNING: %s(cpu=%d) not implemented on this platform\n",
+           __func__, cpu);
+}
+
+void
+daemon_set_nice(int nice)
+{
+    printf("WARNING: %s(nice=%d) not implemented on this platform\n",
+           __func__, nice);
+}
+
+#endif
+
+void
+daemon_set_cpu_and_nice(int cpu, int nice)
+{
+    if (cpu >= 0) {
+        daemon_set_cpu(cpu);
+    }
+    if (nice < 1000) {
+        daemon_set_nice(nice);
+    }
+}
+
+void
+daemon_set_sndbuf_size(struct daemon_ctx *fp)
+{
+    int sndbuf = 0;
+    socklen_t sndbuf_len = sizeof(int);
+
+    if (rpcapd_opt.udp_sndbuf_size < 16384) {
+        rpcapd_opt.udp_sndbuf_size = 8388608;
+    }
+    printf("setting udp pkt sndbuf to %d bytes\n",
+           rpcapd_opt.udp_sndbuf_size);
+#ifdef SO_SNDBUFFORCE
+#define DAEMON_SO_SNDBUF    SO_SNDBUFFORCE
+#else
+#define DAEMON_SO_SNDBUF    SO_SNDBUF
+    printf("SO_SNDBUFFORCE does not exist on this kernel, adjust manually:\n")
+    printf("  $ sudo -i\n");
+    printf("  $ echo 8388608 > /proc/sys/net/core/wmem_max\n");
+#endif
+    if (setsockopt(fp->rmt_sockdata, SOL_SOCKET, DAEMON_SO_SNDBUF,
+                   (char *)&rpcapd_opt.udp_sndbuf_size, sizeof(int)) < 0) {
+        perror("WARNING: setsockopt(SO_SNDBUF) failed");
+    }
+    if (getsockopt(fp->rmt_sockdata, SOL_SOCKET, SO_SNDBUF,
+                   (char *)&sndbuf, &sndbuf_len) < 0) {
+        perror("WARNING: getsockopt(SO_SNDBUF) failed");
+    }
+    printf("udp pkt sndbuf is set to %d bytes\n", sndbuf);
+}
+
+static void
+daemon_send_udp(struct daemon_ctx *fp, const char *buf, unsigned int len)
+{
+    int sleep_budget = 10;
+    ssize_t wlen;
+ again:
+    wlen = send(fp->rmt_sockdata, buf, len, 0);
+    if (wlen != len) {
+        if (errno == EAGAIN) {
+            if (--sleep_budget == 0) {
+                fp->ds.udp_eagain++;
+            }
+            else {
+                fp->ds.udp_eagain_sleep++;
+                usleep(1 * 1000);
+                goto again;
+            }
+        }
+        else {
+            printf("WARNING: %s: send ret=%zd tried to send len=%u\n",
+                   __func__, wlen, len);
+            fp->ds.udp_senderr++;
+            fp->cb_rc = -1;
+        }
+    }
+    else {
+        fp->ds.udp_pkts++;
+        fp->ds.udp_bytes += len;
+    }
+}
+
+void *
+daemon_sendthread_start(void *ptr)
+{
+    char errbuf[PCAP_ERRBUF_SIZE + 1];  // error buffer
+    struct daemon_ctx *fp = ptr;
     struct daemon_ring_ctx *rctx = &daemon_ring_ctx;
+    struct daemon_pkt_entry *entry;
+    unsigned int idx, endidx;
+    unsigned int head_bufidx;
+    unsigned int nbytes;
+
+    daemon_set_cpu_and_nice(rpcapd_opt.cpu_affinity_udp,
+                            rpcapd_opt.nice_udp);
+
+    // Initialize errbuf
+    memset(errbuf, 0, sizeof(errbuf) );
+
+    while (!daemon_sendthread_done) {
+        nbytes = 0;
+        idx = rctx->head;
+        head_bufidx = rctx->head_bufidx;
+        endidx = rctx->tail;
+        rmb();
+        while ((nbytes < 131072) && (idx != endidx)) {
+            entry = &daemon_ring[idx];
+            if (entry->buf_idx < 0) {
+                SOCK_ASSERT("bad ring entry->buf_idx < 0", 1);
+                exit(1);
+            }
+            if (entry->buf_idx != head_bufidx) {
+                printf("head wrap entry->buf_idx=%d head_bufidx=%u\n",
+                       entry->buf_idx, head_bufidx);
+                /* a pkt can't wrap the end of the buffer, so advance to zero */
+                if (entry->buf_idx != 0) {
+                    SOCK_ASSERT("bad ring entry->buf_idx != 0", 1);
+                    exit(1);
+                }
+                nbytes += daemon_ringbuf_len - head_bufidx;
+            }
+            if (entry->len < (sizeof(struct rpcap_header) +
+                              sizeof(struct rpcap_pkthdr))) {
+                SOCK_ASSERT("bad ring entry->len", 1);
+                exit(1);
+            }
+            nbytes += entry->len;
+            daemon_send_udp(fp, &daemon_ringbuf[entry->buf_idx], entry->len);
+            head_bufidx = entry->buf_idx + entry->len;
+            idx = (idx + 1) & daemon_ring_mask;
+        }
+        rctx->head = idx;
+        rctx->head_bufidx = head_bufidx;
+        rctx->head_nbytes += nbytes;
+
+        if (idx == rctx->tail) {
+#if DAEMON_USE_COND_TIMEDWAIT
+            pthread_mutex_lock(&rctx->send_lock);
+            if (idx == rctx->tail) {
+                struct timeval now;
+                struct timespec timeout;
+                int rc = gettimeofday(&now, NULL);
+                if (rc == 0) {
+                    timeout.tv_sec = now.tv_sec + 1;
+                    timeout.tv_nsec = now.tv_usec * 1000;
+                    pthread_cond_timedwait(&rctx->send_cv, &rctx->send_lock,
+                                           &timeout);
+                    fp->ds.sendthr_sleep++;
+                }
+            }
+            pthread_mutex_unlock(&rctx->send_lock);
+#else
+            usleep(10 * 1000);
+            fp->ds.sendring_empty_sleep++;
+            if (rctx->head != rctx->tail) {
+                continue;
+            }
+            usleep(20 * 1000);
+            fp->ds.sendring_empty_sleep++;
+            if (rctx->head != rctx->tail) {
+                continue;
+            }
+            usleep(50 * 1000);
+            fp->ds.sendring_empty_sleep++;
+            if (rctx->head != rctx->tail) {
+                continue;
+            }
+            while (!daemon_sendthread_done && (rctx->head == rctx->tail)) {
+                usleep(100 * 1000);
+                fp->ds.sendring_empty_sleep++;
+            }
+#endif
+        }
+    }
+}
+
+static void
+daemon_build_udp(struct daemon_ctx *fp, const struct pcap_pkthdr *pkt_header,
+                 const u_char *pkt_data, unsigned int caplen,
+                 char *dst)
+{
     struct rpcap_pkthdr *net_pkt_header;
+
+    rpcap_createhdr( (struct rpcap_header *)&dst[0],
+                    RPCAP_MSG_PACKET, 0,
+                    (uint16)(sizeof(struct rpcap_pkthdr) + caplen));
+
+    net_pkt_header= (struct rpcap_pkthdr *) &dst[sizeof(struct rpcap_header)];
+
+    net_pkt_header->caplen= htonl(caplen);
+    net_pkt_header->len= htonl(pkt_header->len);
+    net_pkt_header->npkt= htonl( ++(fp->ds.pcap_dispatched) );
+    net_pkt_header->timestamp_sec= htonl(pkt_header->ts.tv_sec);
+    net_pkt_header->timestamp_usec= htonl(pkt_header->ts.tv_usec);
+
+    if (caplen > fp->ds.pcap_max_caplen) {
+        fp->ds.pcap_max_caplen = caplen;
+    }
+
+    memcpy(&dst[sizeof(struct rpcap_header) + sizeof(struct rpcap_pkthdr)],
+           pkt_data, caplen);
+}
+
+static void
+daemon_dispatch_cb_threaded(u_char *usr, const struct pcap_pkthdr *pkt_header,
+                            const u_char *pkt_data)
+{
     struct daemon_ctx *fp = (struct daemon_ctx *)usr;
+    struct daemon_ring_ctx *rctx = &daemon_ring_ctx;
     struct daemon_pkt_entry *entry;
     unsigned int len;
     unsigned int new_tail;
@@ -1664,31 +1934,11 @@ daemon_pkt_cb(u_char *usr, const struct pcap_pkthdr *pkt_header, const u_char *p
     entry->buf_idx = tail_bufidx;
     entry->len = len;
 
-    rpcap_createhdr( (struct rpcap_header *) &daemon_ringbuf[tail_bufidx],
-                    RPCAP_MSG_PACKET, 0,
-                    (uint16)(sizeof(struct rpcap_pkthdr) + caplen));
-    tail_bufidx += sizeof(struct rpcap_header);
-
-    net_pkt_header= (struct rpcap_pkthdr *) &daemon_ringbuf[tail_bufidx];
-    tail_bufidx += sizeof(struct rpcap_pkthdr);
-
-
-    net_pkt_header->caplen= htonl(caplen);
-    net_pkt_header->len= htonl(pkt_header->len);
-    net_pkt_header->npkt= htonl( ++(fp->ds.TotCapt) );
-    net_pkt_header->timestamp_sec= htonl(pkt_header->ts.tv_sec);
-    net_pkt_header->timestamp_usec= htonl(pkt_header->ts.tv_usec);
-
-    if (caplen > largest_caplen) {
-        largest_caplen = caplen;
-        printf("largest_caplen=%d\n", largest_caplen);
-    }
-
-    memcpy(&daemon_ringbuf[tail_bufidx], pkt_data, caplen);
-    tail_bufidx += caplen;
+    daemon_build_udp(fp, pkt_header, pkt_data, caplen,
+                     &daemon_ringbuf[tail_bufidx]);
 
     rctx->tail_nbytes += nbytes;
-    rctx->tail_bufidx = tail_bufidx;
+    rctx->tail_bufidx = tail_bufidx + len;
     wmb();
     rctx->tail = new_tail;
 #if DAEMON_USE_COND_TIMEDWAIT
@@ -1700,147 +1950,58 @@ daemon_pkt_cb(u_char *usr, const struct pcap_pkthdr *pkt_header, const u_char *p
     return;
 }
 
+int
+daemon_ringbuf_init(struct daemon_ctx *fp, char *errbuf)
+{
+    if (rpcapd_opt.ringbuf_max_pkt_data < 10000) {
+        rpcapd_opt.ringbuf_max_pkt_data = 64000000;
+    }
+    printf("ringbuf_max_pkt_data=%d bytes\n", rpcapd_opt.ringbuf_max_pkt_data);
+    daemon_ringbuf_len = rpcapd_opt.ringbuf_max_pkt_data;
+    daemon_ringbuf = malloc(daemon_ringbuf_len);
+    if (daemon_ringbuf == NULL) {
+        snprintf(errbuf, sizeof(errbuf) - 1, "Unable to create ringbuf len=%u",
+                 daemon_ringbuf_len);
+        rpcap_senderror(fp->rmt_sockctrl, errbuf, PCAP_ERR_READEX, NULL);
+        goto error;
+    }
+
+    if (rpcapd_opt.ringbuf_max_pkts < 8) {
+        rpcapd_opt.ringbuf_max_pkts = 65536;
+    }
+    daemon_ring_ctx.tail_signal = rpcapd_opt.ringbuf_max_pkts / 2;
+    printf("ringbuf_max_pkts=%d pkts\n", rpcapd_opt.ringbuf_max_pkts);
+    daemon_ring = calloc(rpcapd_opt.ringbuf_max_pkts,
+                         sizeof(struct daemon_pkt_entry));
+    if (daemon_ring == NULL) {
+        snprintf(errbuf, sizeof(errbuf) - 1,
+                 "Unable to create ring pkt entries=%u",
+                 rpcapd_opt.ringbuf_max_pkts);
+        rpcap_senderror(fp->rmt_sockctrl, errbuf, PCAP_ERR_READEX, NULL);
+        goto error;
+    }
+    daemon_ring_mask = rpcapd_opt.ringbuf_max_pkts - 1;
+    printf("ring_mask=0x%x\n", daemon_ring_mask);
+
+    return 0;
+
+ error:
+    return -1;
+}
+
 static void
-daemon_sendentry(struct daemon_ctx *fp, char *errbuf,
-                 const char *buf, unsigned int len)
+daemon_dispatch_cb_single_thr(u_char *usr, const struct pcap_pkthdr *pkt_header,
+                              const u_char *pkt_data)
 {
-    int sleep_budget = 10;
-    ssize_t wlen;
- again:
-    wlen = send(fp->rmt_sockdata, buf, len, 0);
-    if (wlen != len) {
-        if (errno == EAGAIN) {
-            if (--sleep_budget == 0) {
-                fp->ds.eagain_pkts++;
-            }
-            else {
-                fp->ds.eagain_sleep++;
-                usleep(1 * 1000);
-                goto again;
-            }
-        }
-        else {
-            printf("WARNING: %s: send ret=%zd tried to send len=%u\n",
-                   __func__, wlen, len);
-            /* XXX: fp->cb_rc = -1; */
-        }
-    }
-    else {
-        fp->ds.svrcapt++;
-        fp->ds.svrbytes += len;
-    }
-}
+    struct daemon_ctx *fp = (struct daemon_ctx *)usr;
+    unsigned int caplen = pkt_header->caplen;
+    unsigned int len;
 
-#ifdef linux
-#include <sched.h>
-#include <syscall.h>
-#include <sys/resource.h>
-#define gettid() syscall(__NR_gettid)
+    len = sizeof(struct rpcap_header) + sizeof(struct rpcap_pkthdr) + caplen;
 
-void
-daemon_set_cpu_and_nice(int cpu, int nice)
-{
-    int rtid = gettid();
-    cpu_set_t csmask;
+    daemon_build_udp(fp, pkt_header, pkt_data, caplen, fp->sendbuf);
 
-    CPU_ZERO(&csmask);
-    CPU_SET(cpu, &csmask);
-    printf("attempting sched_setaffinity(%d), cur cpu=%d\n",
-           cpu, sched_getcpu());
-    if (sched_setaffinity(rtid, sizeof(cpu_set_t), &csmask) != 0) {
-        perror("WARNING: sched_setaffinity() failed");
-    }
-    printf("    now cpu=%d\n", sched_getcpu());
-    printf("attempting setpriority(%d)\n", nice);
-    if (setpriority(PRIO_PROCESS, rtid, nice) != 0) {
-        perror("WARNING: setpriority() failed");
-    }
-}
-#else
-
-void
-daemon_set_cpu_and_nice(int cpu, int nice)
-{
-    printf("WARNING: %s(cpu=%d, nice=%d) not implemented on this platform\n",
-           __func__, cpu, nice);
-}
-
-#endif
-
-void *daemon_sendthread_fn(void *ptr)
-{
-char errbuf[PCAP_ERRBUF_SIZE + 1];  // error buffer
-struct daemon_ctx *fp = ptr;
-struct daemon_ring_ctx *rctx = &daemon_ring_ctx;
-struct daemon_pkt_entry *entry;
-unsigned int idx, endidx;
-unsigned int head_bufidx;
-unsigned int nbytes;
-
-    daemon_set_cpu_and_nice(0, 10);
-
-    // Initialize errbuf
-    memset(errbuf, 0, sizeof(errbuf) );
-
-    while (!daemon_sendthread_done) {
-        nbytes = 0;
-        idx = rctx->head;
-        head_bufidx = rctx->head_bufidx;
-        endidx = rctx->tail;
-        rmb();
-        while ((nbytes < 131072) && (idx != endidx)) {
-            entry = &daemon_ring[idx];
-            if (entry->buf_idx < 0) {
-                SOCK_ASSERT("bad ring entry->buf_idx < 0", 1);
-                exit(1);
-            }
-            if (entry->buf_idx != head_bufidx) {
-                printf("head wrap entry->buf_idx=%d head_bufidx=%u\n",
-                       entry->buf_idx, head_bufidx);
-                /* a pkt can't wrap the end of the buffer, so advance to zero */
-                if (entry->buf_idx != 0) {
-                    SOCK_ASSERT("bad ring entry->buf_idx != 0", 1);
-                    exit(1);
-                }
-                nbytes += daemon_ringbuf_len - head_bufidx;
-            }
-            if (entry->len < (sizeof(struct rpcap_header) +
-                              sizeof(struct rpcap_pkthdr))) {
-                SOCK_ASSERT("bad ring entry->len", 1);
-                exit(1);
-            }
-            nbytes += entry->len;
-            daemon_sendentry(fp, errbuf, &daemon_ringbuf[entry->buf_idx],
-                             entry->len);
-            head_bufidx = entry->buf_idx + entry->len;
-            idx = (idx + 1) & daemon_ring_mask;
-        }
-        rctx->head = idx;
-        rctx->head_bufidx = head_bufidx;
-        rctx->head_nbytes += nbytes;
-
-        if (idx == rctx->tail) {
-#if DAEMON_USE_COND_TIMEDWAIT
-            pthread_mutex_lock(&rctx->send_lock);
-            if (idx == rctx->tail) {
-                struct timeval now;
-                struct timespec timeout;
-                int rc = gettimeofday(&now, NULL);
-                if (rc == 0) {
-                    timeout.tv_sec = now.tv_sec + 1;
-                    timeout.tv_nsec = now.tv_usec * 1000;
-                    pthread_cond_timedwait(&rctx->send_cv, &rctx->send_lock,
-                                           &timeout);
-                    fp->ds.sendthr_sleep++;
-                }
-            }
-            pthread_mutex_unlock(&rctx->send_lock);
-#else
-            usleep(10 * 1000);
-            fp->ds.sendthr_sleep++;
-#endif
-        }
-    }
+    daemon_send_udp(fp, fp->sendbuf, len);
 }
 
 void *daemon_thrdatamain(void *ptr)
@@ -1856,6 +2017,7 @@ int sendbufidx;						// index which keeps the number of bytes currently buffered
 int largest_retval = 0;
 pthread_t sendthread;
 int sendthread_started = 0;
+pcap_handler dispatch_cb = daemon_dispatch_cb_threaded;
 
 
 	fp= (struct daemon_ctx *) ptr;
@@ -1871,36 +2033,11 @@ int sendthread_started = 0;
 	pthread_cond_init(&daemon_ring_ctx.send_cv, NULL);
 	daemon_sendthread_done = 0;
 
-	if (rpcapd_opt.ringbuf_max_pkt_data < 10000) {
-	    rpcapd_opt.ringbuf_max_pkt_data = 64000000;
+	if (!rpcapd_opt.single_threaded) {
+	    if (daemon_ringbuf_init(fp, errbuf) != 0) {
+	        goto error;
+	    }
 	}
-	printf("ringbuf_max_pkt_data=%d bytes\n", rpcapd_opt.ringbuf_max_pkt_data);
-	daemon_ringbuf_len = rpcapd_opt.ringbuf_max_pkt_data;
-	daemon_ringbuf = malloc(daemon_ringbuf_len);
-	if (daemon_ringbuf == NULL) {
-	    snprintf(errbuf, sizeof(errbuf) - 1, "Unable to create ringbuf len=%u",
-	             daemon_ringbuf_len);
-	    rpcap_senderror(fp->rmt_sockctrl, errbuf, PCAP_ERR_READEX, NULL);
-        goto error;
-	}
-
-	if (rpcapd_opt.ringbuf_max_pkts < 8) {
-	    rpcapd_opt.ringbuf_max_pkts = 65536;
-	}
-	daemon_ring_ctx.tail_signal = rpcapd_opt.ringbuf_max_pkts / 2;
-	printf("ringbuf_max_pkts=%d pkts\n", rpcapd_opt.ringbuf_max_pkts);
-	daemon_ring = calloc(rpcapd_opt.ringbuf_max_pkts,
-	                     sizeof(struct daemon_pkt_entry));
-	if (daemon_ring == NULL) {
-        snprintf(errbuf, sizeof(errbuf) - 1,
-                 "Unable to create ring pkt entries=%u",
-                 rpcapd_opt.ringbuf_max_pkts);
-        rpcap_senderror(fp->rmt_sockctrl, errbuf, PCAP_ERR_READEX, NULL);
-        goto error;
-	}
-	daemon_ring_mask = rpcapd_opt.ringbuf_max_pkts - 1;
-	printf("ring_mask=0x%x\n", daemon_ring_mask);
-
 
 	// Modify thread params so that it can be killed at any time
 	if (pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL) )
@@ -1908,56 +2045,57 @@ int sendthread_started = 0;
 	if (pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL) )
 		goto error;
 
-	if (rpcapd_opt.udp_sndbuf_size < 16384) {
-	    rpcapd_opt.udp_sndbuf_size = 8388608;
+	daemon_set_sndbuf_size(fp);
+
+	if (rpcapd_opt.blocking_udp_socket) {
+	    printf("udp pkt socket blocking\n");
 	}
-	printf("setting udp pkt sndbuf to %d bytes\n",
-	       rpcapd_opt.udp_sndbuf_size);
-#ifdef SO_SNDBUFFORCE
-#define DAEMON_SO_SNDBUF    SO_SNDBUFFORCE
-#else
-#define DAEMON_SO_SNDBUF    SO_SNDBUF
-    printf("SO_SNDBUFFORCE does not exist on this kernel, adjust manually:\n")
-	printf("  $ sudo -i\n");
-	printf("  $ echo 8388608 > /proc/sys/net/core/wmem_max\n");
-#endif
-	if (setsockopt(fp->rmt_sockdata, SOL_SOCKET, DAEMON_SO_SNDBUF,
-	               (char *)&rpcapd_opt.udp_sndbuf_size, sizeof(int)) < 0) {
-	    perror("WARNING: setsockopt(SO_SNDBUF) failed");
-	}
-	int sndbuf = 0;
-	socklen_t sndbuf_len = sizeof(int);
-	if (getsockopt(fp->rmt_sockdata, SOL_SOCKET, SO_SNDBUF,
-                   (char *)&sndbuf, &sndbuf_len) < 0) {
-        perror("WARNING: getsockopt(SO_SNDBUF) failed");
-    }
-	printf("udp pkt sndbuf is set to %d bytes\n", sndbuf);
-	if (set_non_blocking(fp->rmt_sockdata) < 0) {
-	    perror("WARNING: set_non_blocking(udp sock) failed");
+	else {
+	    printf("udp pkt socket non-blocking\n");
+        if (set_non_blocking(fp->rmt_sockdata) < 0) {
+            perror("WARNING: set_non_blocking(udp sock) failed");
+        }
 	}
 
-	daemon_set_cpu_and_nice(1, -15);
+	daemon_set_cpu_and_nice(rpcapd_opt.cpu_affinity_pcap,
+	                        rpcapd_opt.nice_pcap);
 
-	printf("Starting packet sending thread\n");
-    if ( pthread_create(&sendthread, NULL, (void *) daemon_sendthread_fn, (void *) fp) )
-    {
-        snprintf(errbuf, PCAP_ERRBUF_SIZE, "Error creating the sending thread");
-        rpcap_senderror(fp->rmt_sockctrl, errbuf, PCAP_ERR_READEX, NULL);
-        goto error;
-    }
-    sendthread_started = 1;
+	if (rpcapd_opt.single_threaded) {
+	    printf("Starting in single-threaded mode\n");
+	    dispatch_cb = daemon_dispatch_cb_single_thr;
+	    fp->sendbuf = malloc(66000);
+	    if (fp->sendbuf == NULL) {
+	        snprintf(errbuf, PCAP_ERRBUF_SIZE, "Error allocating sendbuf");
+	        rpcap_senderror(fp->rmt_sockctrl, errbuf, PCAP_ERR_READEX, NULL);
+	        goto error;
+	    }
+	}
+	else {
+        printf("Starting packet sending thread\n");
+        if (pthread_create(&sendthread, NULL, (void *)daemon_sendthread_start,
+                            (void *)fp) != 0) {
+            snprintf(errbuf, PCAP_ERRBUF_SIZE,
+                     "Error creating the sending thread");
+            rpcap_senderror(fp->rmt_sockctrl, errbuf, PCAP_ERR_READEX, NULL);
+            goto error;
+        }
+        sendthread_started = 1;
+	}
 
 	// Retrieve the packets
-	while ((retval = pcap_dispatch(fp->fp, 1000000, daemon_pkt_cb,
+	while ((retval = pcap_dispatch(fp->fp, 1000000, dispatch_cb,
 	                               (u_char *)fp)) >= 0)
 	{
 		if (retval == 0) {	// Read timeout elapsed
-		    fp->ds.read_timeouts++;
+		    fp->ds.pcap_read_timeouts++;
 			continue;
 		}
-		if (retval > largest_retval) {
-		    largest_retval = retval;
-		    printf("retval=%d\n", retval);
+		if (retval > fp->ds.pcap_max_dispatched) {
+		    fp->ds.pcap_max_dispatched = retval;
+		}
+		if (fp->cb_rc != 0) {
+		    retval = -1;
+		    break;
 		}
 	}
 
@@ -1971,6 +2109,7 @@ int sendthread_started = 0;
 error:
 
 	SOCK_ASSERT(errbuf, 1);
+	printf("ERROR: %s\n", errbuf);
  	closesocket(fp->rmt_sockdata);
 	fp->rmt_sockdata= 0;
 
