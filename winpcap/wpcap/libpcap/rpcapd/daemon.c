@@ -88,6 +88,8 @@ struct daemon_ctx_stats {
     unsigned int udp_bytes;
     unsigned int udp_eagain;
     unsigned int udp_eagain_sleep;
+    unsigned int udp_enobufs;
+    unsigned int udp_enobufs_sleep;
     unsigned int udp_senderr;
     unsigned int sendring_empty_sleep;
 };
@@ -1547,10 +1549,11 @@ struct rpcap_stats *netstats;		// statistics sent on the network
                ds.sendring_empty_sleep);
 	}
 	printf("sent=%u (%u)\t" "sentbytes=%u (%u)\t" "eagain=%u (%u sleep)\t"
-	       "senderr=%u\n",
+           "enobufs=%u (%u sleep)\t" "senderr=%u\n",
 	       (ds.udp_pkts - fp->prev_ds.udp_pkts), ds.udp_pkts,
 	       (ds.udp_bytes - fp->prev_ds.udp_bytes), ds.udp_bytes,
 	       ds.udp_eagain, ds.udp_eagain_sleep,
+	       ds.udp_enobufs, ds.udp_enobufs_sleep,
 	       ds.udp_senderr);
 	printf("    max_dispatch=%u max_caplen=%u read_timeout=%u\n",
 	       ds.pcap_max_dispatched, ds.pcap_max_caplen, ds.pcap_read_timeouts);
@@ -1731,13 +1734,34 @@ daemon_set_sndbuf_size(struct daemon_ctx *fp)
                    (char *)&sndbuf, &sndbuf_len) < 0) {
         perror("WARNING: getsockopt(SO_SNDBUF) failed");
     }
-    printf("udp pkt sndbuf is set to %d bytes\n", sndbuf);
+    printf("    udp pkt sndbuf is set to %d bytes\n", sndbuf);
+}
+
+void
+daemon_set_ip_recverr(struct daemon_ctx *fp)
+{
+#ifdef IP_RECVERR
+    int one = 1;
+    socklen_t one_len = sizeof(int);
+    printf("setting IP_RECVERR to 1\n");
+    if (setsockopt(fp->rmt_sockdata, SOL_IP, IP_RECVERR,
+                   &one, sizeof(int)) < 0) {
+        perror("WARNING: setsockopt(IP_RECVERR) failed");
+    }
+    if (getsockopt(fp->rmt_sockdata, SOL_IP, IP_RECVERR,
+                   &one, &one_len) < 0) {
+        perror("WARNING: getsockopt(IP_RECVERR) failed");
+    }
+    printf("    IP_RECVERR is set to %d\n", one);
+#else
+    printf("WARNING: current platform doesn't support IP_RECVERR\n");
+#endif
 }
 
 static void
 daemon_send_udp(struct daemon_ctx *fp, const char *buf, unsigned int len)
 {
-    int sleep_budget = 10;
+    int sleep_budget = 100;
     ssize_t wlen;
 
     if (rpcapd_opt.no_udp) {
@@ -1757,9 +1781,18 @@ daemon_send_udp(struct daemon_ctx *fp, const char *buf, unsigned int len)
                 goto again;
             }
         }
+        else if (errno == ENOBUFS) {
+            if (--sleep_budget == 0) {
+                fp->ds.udp_enobufs++;
+            }
+            else {
+                fp->ds.udp_enobufs_sleep++;
+                usleep(10 * 1000);
+                goto again;
+            }
+        }
         else {
-            printf("WARNING: %s: send ret=%zd tried to send len=%u\n",
-                   __func__, wlen, len);
+            perror("WARNING: send(udp_fd) failed");
             fp->ds.udp_senderr++;
             fp->cb_rc = -1;
         }
@@ -2054,6 +2087,7 @@ pcap_handler dispatch_cb = daemon_dispatch_cb_threaded;
 		goto error;
 
 	daemon_set_sndbuf_size(fp);
+	daemon_set_ip_recverr(fp);
 
 	if (rpcapd_opt.blocking_udp_socket) {
 	    printf("udp pkt socket blocking\n");
