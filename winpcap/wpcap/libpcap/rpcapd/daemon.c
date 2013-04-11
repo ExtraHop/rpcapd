@@ -57,6 +57,8 @@ set_non_blocking(int fd)
 
 #else
 
+#define ENOBUFS WSAENOBUFS
+
 int
 set_non_blocking(int fd)
 {
