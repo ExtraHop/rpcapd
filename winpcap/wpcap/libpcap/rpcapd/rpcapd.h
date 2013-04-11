@@ -49,6 +49,7 @@ struct active_pars
 };
 
 struct rpcapd_opt {
+    int pcap_buffer_size;
     int ringbuf_max_pkt_data;
     int ringbuf_max_pkts;
     int udp_sndbuf_size;
@@ -58,6 +59,7 @@ struct rpcapd_opt {
     int nice_udp;
     char blocking_udp_socket;
     char single_threaded;
+    char no_udp;
 };
 
 extern struct rpcapd_opt rpcapd_opt;

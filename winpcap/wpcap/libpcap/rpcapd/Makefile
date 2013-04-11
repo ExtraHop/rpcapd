@@ -3,7 +3,7 @@
 ################################
 
 CC      = gcc
-CFLAGS  = -pthread -DHAVE_REMOTE -DHAVE_SNPRINTF -D_GNU_SOURCE=1
+CFLAGS  = -pthread -DHAVE_REMOTE -DHAVE_SNPRINTF -D_GNU_SOURCE=1 -O3
 #flags for debugging: -D_DEBUG -g -Wall
 
 INCLUDE = -I../

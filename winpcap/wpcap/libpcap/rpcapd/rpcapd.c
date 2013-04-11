@@ -109,6 +109,8 @@ void printusage()
 	"  -s <file>: save the current configuration to file\n"
  	"  -f <file>: load the current configuration from file; all the switches\n"
   	"      specified from the command line are ignored\n"
+	"  -y <dry run - don't send any udp packets>\n"
+	"  -z <pcap_set_buffer_size>\n"
 	"  -u <udp socket sndbuf size>\n"
 	"  -g <udp socket blocking instead of non-blocking>\n"
 	"  -c 'single'  -- single threaded mode\n'"
@@ -156,13 +158,14 @@ int k;
 	mainhints.ai_flags = AI_PASSIVE;	// Ready to a bind() socket
 	mainhints.ai_socktype = SOCK_STREAM;
 
+	rpcapd_opt.pcap_buffer_size = 16777216;
 	rpcapd_opt.cpu_affinity_pcap = -1;
 	rpcapd_opt.cpu_affinity_udp = -1;
 	rpcapd_opt.nice_pcap = 1000;
 	rpcapd_opt.nice_udp = 1000;
 
 	// Getting the proper command line options
-	while ((retval = getopt(argc, argv, "b:dhp:4l:na:s:f:vu:gc:e:m:k:")) != -1)
+	while ((retval = getopt(argc, argv, "b:dhp:4l:na:s:f:vyz:u:gc:e:m:k:")) != -1)
 	{
 		switch (retval)
 		{
@@ -242,6 +245,13 @@ int k;
 			        rpcapd_opt.ringbuf_max_pkts <<= 1;
 			    }
 			    break;
+            case 'y':
+                rpcapd_opt.no_udp = 1;
+                printf("DRY RUN - NO UDP WILL BE SENT\n");
+                break;
+            case 'z':
+                rpcapd_opt.pcap_buffer_size = atoi(optarg);
+                break;
 			case 'u':
 			    rpcapd_opt.udp_sndbuf_size = atoi(optarg);
 			    if (rpcapd_opt.udp_sndbuf_size <= 0) {
@@ -256,12 +266,12 @@ int k;
                     rpcapd_opt.single_threaded = 1;
                     break;
                 }
-                scanf("%d,%d", &rpcapd_opt.cpu_affinity_pcap,
-                      &rpcapd_opt.cpu_affinity_udp);
+                sscanf(optarg, "%d,%d", &rpcapd_opt.cpu_affinity_pcap,
+                       &rpcapd_opt.cpu_affinity_udp);
                 break;
             case 'e':
-                scanf("%d,%d", &rpcapd_opt.nice_pcap,
-                      &rpcapd_opt.nice_udp);
+                sscanf(optarg, "%d,%d", &rpcapd_opt.nice_pcap,
+                       &rpcapd_opt.nice_udp);
                 break;
 			case 'h':
 				printusage();

@@ -122,9 +122,10 @@ pcap_t *pcap_open_live_ex(const char *source, int buffer_size, int snaplen, int 
     p = pcap_create(source, errbuf);
     if (p == NULL)
         return (NULL);
+    printf("pcap_set_buffer_size(%d)\n", buffer_size);
     status = pcap_set_buffer_size(p, buffer_size);
     if (status < 0) {
-        printf("set_buffer_size failed\n");
+        printf("pcap_set_buffer_size(%d) failed\n", buffer_size);
     }
     status = pcap_set_snaplen(p, snaplen);
     if (status < 0)
@@ -175,7 +176,7 @@ daemon_ctx_open(const char *source, int snaplen, int flags, int read_timeout, st
     struct daemon_ctx *fp = malloc(sizeof(struct daemon_ctx));
     if (fp) {
         memset(fp, 0, sizeof(struct daemon_ctx));
-        fp->fp = pcap_open_ex(source, rpcapd_opt.ringbuf_max_pkt_data, snaplen, (flags & PCAP_OPENFLAG_PROMISCUOUS), read_timeout, NULL, errbuf);
+        fp->fp = pcap_open_ex(source, rpcapd_opt.pcap_buffer_size, snaplen, (flags & PCAP_OPENFLAG_PROMISCUOUS), read_timeout, NULL, errbuf);
         if (!fp->fp) {
             free(fp);
             fp = NULL;
@@ -1524,10 +1525,11 @@ struct rpcap_stats *netstats;		// statistics sent on the network
 
 	struct daemon_ctx_stats ds = fp->ds;
 
-	printf("ifrecv=%u (%u)\t TotCapt=%u (%u)\t"
-	       " krnldrop=%u %u%% (%u %u%%)\t ifdrop=%u (%u)\n",
-	       (stats.ps_ifdrop - fp->prev_ps.ps_ifdrop), stats.ps_ifdrop,
+	printf("ifrecv=%u (%u)\t" "TotCapt=%u (%u)\t"
+	       "krnldrop=%u %u%% (%u %u%%)\t" "ifdrop=%u (%u)\n",
 	       (stats.ps_recv - fp->prev_ps.ps_recv), stats.ps_recv,
+	       (ds.pcap_dispatched - fp->prev_ds.pcap_dispatched),
+	               ds.pcap_dispatched,
 	       (stats.ps_drop - fp->prev_ps.ps_drop),
 	       ((stats.ps_recv - fp->prev_ps.ps_recv) == 0) ? 0 :
 	               ((stats.ps_drop - fp->prev_ps.ps_drop) * 100) /
@@ -1535,18 +1537,17 @@ struct rpcap_stats *netstats;		// statistics sent on the network
 	       stats.ps_drop,
 	       (stats.ps_recv == 0) ? 0 :
 	               (stats.ps_drop * 100) / stats.ps_recv,
-	       (ds.pcap_dispatched - fp->prev_ds.pcap_dispatched),
-	       ds.pcap_dispatched);
+	       (stats.ps_ifdrop - fp->prev_ps.ps_ifdrop), stats.ps_ifdrop);
 	if (!rpcapd_opt.single_threaded) {
         printf("    sendring_full=%u (%u sleep)\t"
-               " sendring_buf_full=%u (%u sleep)\t"
-               " sendthr empty sleep=%u\n",
+               "sendring_buf_full=%u (%u sleep)\t"
+               "sendthr empty sleep=%u\n",
                ds.sendring_full, ds.sendring_full_sleep,
                ds.sendring_buf_full, ds.sendring_buf_full_sleep,
                ds.sendring_empty_sleep);
 	}
-	printf("sent=%u (%u)\t sentbytes=%u (%u)\t eagain=%u (%u sleep)\t"
-	       " senderr=%u\n",
+	printf("sent=%u (%u)\t" "sentbytes=%u (%u)\t" "eagain=%u (%u sleep)\t"
+	       "senderr=%u\n",
 	       (ds.udp_pkts - fp->prev_ds.udp_pkts), ds.udp_pkts,
 	       (ds.udp_bytes - fp->prev_ds.udp_bytes), ds.udp_bytes,
 	       ds.udp_eagain, ds.udp_eagain_sleep,
@@ -1738,6 +1739,11 @@ daemon_send_udp(struct daemon_ctx *fp, const char *buf, unsigned int len)
 {
     int sleep_budget = 10;
     ssize_t wlen;
+
+    if (rpcapd_opt.no_udp) {
+        return;
+    }
+
  again:
     wlen = send(fp->rmt_sockdata, buf, len, 0);
     if (wlen != len) {
@@ -1829,7 +1835,7 @@ daemon_sendthread_start(void *ptr)
                     timeout.tv_nsec = now.tv_usec * 1000;
                     pthread_cond_timedwait(&rctx->send_cv, &rctx->send_lock,
                                            &timeout);
-                    fp->ds.sendthr_sleep++;
+                    fp->ds.sendring_empty_sleep++;
                 }
             }
             pthread_mutex_unlock(&rctx->send_lock);
@@ -1965,6 +1971,7 @@ daemon_ringbuf_init(struct daemon_ctx *fp, char *errbuf)
         rpcap_senderror(fp->rmt_sockctrl, errbuf, PCAP_ERR_READEX, NULL);
         goto error;
     }
+    memset(daemon_ringbuf, 0, daemon_ringbuf_len);
 
     if (rpcapd_opt.ringbuf_max_pkts < 8) {
         rpcapd_opt.ringbuf_max_pkts = 65536;
@@ -2023,6 +2030,7 @@ pcap_handler dispatch_cb = daemon_dispatch_cb_threaded;
 	fp= (struct daemon_ctx *) ptr;
 
 	memset(&fp->ds, 0, sizeof(struct daemon_ctx_stats));
+	fp->cb_rc = 0;
 
 	// Initialize errbuf
 	memset(errbuf, 0, sizeof(errbuf) );
@@ -2113,7 +2121,8 @@ error:
  	closesocket(fp->rmt_sockdata);
 	fp->rmt_sockdata= 0;
 
-	free(sendbuf);
+	free(fp->sendbuf);
+	fp->sendbuf = NULL;
 
 	daemon_sendthread_done = 1;
 	if (sendthread_started) {
