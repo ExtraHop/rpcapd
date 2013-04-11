@@ -41,6 +41,7 @@
 #include "sockutils.h"	// for socket calls
 
 #ifndef WIN32			// for select() and such
+#include <fcntl.h>
 #include <unistd.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -49,19 +50,18 @@
 int
 set_non_blocking(int fd)
 {
-    printf("WARNING: %s(fd=%d) not implemented on this platform\n",
-           __func__, fd);
+    int flags = fcntl(fd, F_GETFL);
+    flags |= O_NONBLOCK;
+    return fcntl(fd, F_SETFL, flags);
 }
-#else
 
-#include <fcntl.h>
+#else
 
 int
 set_non_blocking(int fd)
 {
-    int flags = fcntl(fd, F_GETFL);
-    flags |= O_NONBLOCK;
-    return fcntl(fd, F_SETFL, flags);
+    printf("WARNING: %s(fd=%d) not implemented on this platform\n",
+           __func__, fd);
 }
 
 #endif
