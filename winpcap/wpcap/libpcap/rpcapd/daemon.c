@@ -1722,7 +1722,7 @@ daemon_set_sndbuf_size(struct daemon_ctx *fp)
 #define DAEMON_SO_SNDBUF    SO_SNDBUFFORCE
 #else
 #define DAEMON_SO_SNDBUF    SO_SNDBUF
-    printf("SO_SNDBUFFORCE does not exist on this kernel, adjust manually:\n")
+    printf("SO_SNDBUFFORCE does not exist on this kernel, adjust manually:\n");
     printf("  $ sudo -i\n");
     printf("  $ echo 8388608 > /proc/sys/net/core/wmem_max\n");
 #endif
