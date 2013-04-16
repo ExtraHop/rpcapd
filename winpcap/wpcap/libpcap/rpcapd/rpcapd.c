@@ -113,7 +113,8 @@ void printusage()
 	"  -z <pcap_set_buffer_size>\n"
 	"  -u <udp socket sndbuf size>\n"
 	"  -g <udp socket blocking instead of non-blocking>\n"
-	"  -c 'single'  -- single threaded mode\n'"
+	"  -t <udp mtu size - enables non-standard mode>\n"
+	"  -c 'single'  -- single threaded mode\n"
 	"     '1,0'     -- cpu affinity for <pcap thread>,<send thread>\n"
 	"  -e -15,10    -- nice values of <pcap thread>,<send thread>\n"
 	"  -m <for multithreaded mode: ringbuf data buffer in MB>\n"
@@ -165,7 +166,7 @@ int k;
 	rpcapd_opt.nice_udp = 1000;
 
 	// Getting the proper command line options
-	while ((retval = getopt(argc, argv, "b:dhp:4l:na:s:f:vyz:u:gc:e:m:k:")) != -1)
+	while ((retval = getopt(argc, argv, "b:dhp:4l:na:s:f:vyz:u:gc:e:m:k:t:")) != -1)
 	{
 		switch (retval)
 		{
@@ -272,6 +273,12 @@ int k;
             case 'e':
                 sscanf(optarg, "%d,%d", &rpcapd_opt.nice_pcap,
                        &rpcapd_opt.nice_udp);
+                break;
+            case 't':
+                rpcapd_opt.udp_mtu = atoi(optarg);
+                if (rpcapd_opt.udp_mtu > 65000) {
+                    rpcapd_opt.udp_mtu = 65000;
+                }
                 break;
 			case 'h':
 				printusage();

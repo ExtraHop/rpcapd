@@ -116,6 +116,14 @@ struct daemon_ctx {
     int cb_rc;
     char *sendbuf;
     char *errbuf;
+    struct rpcap_udpstr_header udphdr;
+    uint32_t udp_seqno;
+    uint16_t udp_firsthdr;
+    unsigned int sendbufidx;
+    unsigned int iov_len;
+    unsigned int iov_count;
+    struct iovec iov[32]; /* iov[0] is for the udpstr header */
+    struct msghdr msghdr;
 };
 
 pcap_t *pcap_open_live_ex(const char *source, int buffer_size, int snaplen, int promisc, int to_ms, char *errbuf)
@@ -1616,6 +1624,40 @@ error:
 #define rmb()   asm volatile("lfence":::"memory")
 #define wmb()   asm volatile("sfence":::"memory")
 
+#define likely(x)   __builtin_expect((x), 1)
+#define unlikely(x) __builtin_expect((x), 0)
+
+#define ARRAY_SIZE(a)   (sizeof(a) / (sizeof((a)[0])))
+
+#ifndef ASSERT
+#define ASSERT(_x)  if (unlikely(!(_x))) \
+    ex_assert(__FILE__, __LINE__, __func__, STRINGIFY(_x))
+#endif
+
+#ifndef __STRING
+#define __STRING(x)     #x
+#endif
+
+#define STRINGIFY(x)    __STRING(x)
+
+#define __NORETURN __attribute__((noreturn))
+
+void ex_assert(const char *file, int line, const char *func,
+               const char *strx) __NORETURN;
+
+void
+ex_assert(const char *file, int line, const char *func, const char *strx)
+{
+    time_t t = time(NULL);
+    char tstr[26] = {0};
+    ctime_r(&t, tstr);
+    tstr[24] = '\0';
+    fprintf(stderr, "%s: %s:%d:%s: Assertion '%s' failed\n",
+            tstr, file, line, func, strx);
+    fflush(stderr);
+    abort();
+}
+
 static volatile int daemon_sendthread_done;
 
 static char *daemon_ringbuf;
@@ -1772,7 +1814,7 @@ daemon_send_udp(struct daemon_ctx *fp, const char *buf, unsigned int len)
 
  again:
     wlen = send(fp->rmt_sockdata, buf, len, 0);
-    if (wlen != len) {
+    if (unlikely(wlen != len)) {
         if (errno == EAGAIN) {
             if (--sleep_budget == 0) {
                 fp->ds.udp_eagain++;
@@ -1805,6 +1847,159 @@ daemon_send_udp(struct daemon_ctx *fp, const char *buf, unsigned int len)
     }
 }
 
+static void
+daemon_sendv_udp(struct daemon_ctx *fp, unsigned int iov_len,
+                 unsigned int iov_count)
+{
+    int sleep_budget = 100;
+    ssize_t wlen;
+
+    if (rpcapd_opt.no_udp) {
+        return;
+    }
+
+    fp->msghdr.msg_iovlen = iov_count;
+    fp->udphdr.firsthdridx = htons(fp->udp_firsthdr);
+    fp->udphdr.seqno = htonl(fp->udp_seqno);
+
+ again:
+    wlen = sendmsg(fp->rmt_sockdata, &fp->msghdr, 0);
+    if (unlikely(wlen != iov_len)) {
+        if (errno == EAGAIN) {
+            if (--sleep_budget == 0) {
+                fp->ds.udp_eagain++;
+            }
+            else {
+                fp->ds.udp_eagain_sleep++;
+                usleep(1 * 1000);
+                goto again;
+            }
+        }
+        else if (errno == ENOBUFS) {
+            if (--sleep_budget == 0) {
+                fp->ds.udp_enobufs++;
+            }
+            else {
+                fp->ds.udp_enobufs_sleep++;
+                usleep(10 * 1000);
+                goto again;
+            }
+        }
+        else if (wlen >= 0) {
+            printf("WARNING: sendv(udp_fd) returned %zd, expected %u\n",
+                   wlen, iov_len);
+        }
+        else {
+            perror("WARNING: send(udp_fd) failed");
+            fp->ds.udp_senderr++;
+            fp->cb_rc = -1;
+        }
+    }
+    else {
+        fp->ds.udp_pkts++;
+        fp->ds.udp_bytes += iov_len;
+    }
+}
+
+static void
+daemon_udpstr_flush(struct daemon_ctx *fp, unsigned int udp_mtu)
+{
+    /* packets in iov are about to become invalid, flush any buffered data */
+    if (fp->iov_count < 2) {
+        /* no packet data */
+        return;
+    }
+    ASSERT(fp->iov_len <= udp_mtu);
+    daemon_sendv_udp(fp, fp->iov_len, fp->iov_count);
+    fp->udp_firsthdr = UDPSTR_FIRSTHDR_NONE;
+    fp->udp_seqno++;
+    fp->iov_count = 1;
+    fp->iov_len = sizeof(fp->udphdr);
+    fp->sendbufidx = 0;
+}
+
+/**
+ * If pkthdr is NULL, then pkthdr is assumed to be at buf[0].
+ */
+static void
+daemon_udpstr_write(struct daemon_ctx *fp, struct rpcap_pkthdr *pkthdr,
+                    char *buf, unsigned int len, unsigned int udp_mtu)
+{
+    unsigned int ext_len;
+    unsigned int sub;
+    unsigned int off;
+
+    ASSERT(fp->iov_count > 0);
+    /* there's currently not enough data to fill a full packet */
+    ASSERT(fp->iov_len < udp_mtu - sizeof(struct rpcap_udpstr_header) -
+                         sizeof(struct rpcap_pkthdr));
+    /* add this packet to the buffered packets */
+    if (pkthdr != NULL) {
+        if (fp->iov_count >= ARRAY_SIZE(fp->iov) - 2) {
+            daemon_udpstr_flush(fp, udp_mtu);
+        }
+    }
+    if (fp->udp_firsthdr == UDPSTR_FIRSTHDR_NONE) {
+        fp->udp_firsthdr = fp->iov_len;
+    }
+    if (pkthdr != NULL) {
+        fp->iov[fp->iov_count].iov_base = pkthdr;
+        fp->iov[fp->iov_count].iov_len = sizeof(struct rpcap_pkthdr);
+        fp->iov_len += sizeof(struct rpcap_pkthdr);
+        fp->iov_count++;
+    }
+    fp->iov[fp->iov_count].iov_base = buf;
+    fp->iov[fp->iov_count].iov_len = len;
+    fp->iov_len += len;
+    fp->iov_count++;
+
+    while (fp->iov_len >= udp_mtu - sizeof(struct rpcap_udpstr_header) -
+                          sizeof(struct rpcap_pkthdr)) {
+        /* send all buffered packets, adjust last iov len */
+        if (fp->iov_len > udp_mtu) {
+            sub = fp->iov_len - udp_mtu;
+            ASSERT(fp->iov_count > 1);
+            ASSERT(fp->iov[fp->iov_count - 1].iov_len > sub);
+            fp->iov[fp->iov_count - 1].iov_len -= sub;
+            ext_len = udp_mtu;
+        }
+        else {
+            ext_len = fp->iov_len;
+        }
+        daemon_sendv_udp(fp, ext_len, fp->iov_count);
+        fp->udp_firsthdr = UDPSTR_FIRSTHDR_NONE;
+        fp->udp_seqno++;
+        fp->sendbufidx = 0;
+        if (fp->iov_len > udp_mtu) {
+            /* remove all but last iov, adjust length */
+            if (fp->iov_count > 2) {
+                fp->iov[1] = fp->iov[fp->iov_count - 1];
+            }
+            fp->iov[1].iov_len += sub;
+            ASSERT(fp->iov_len > fp->iov[1].iov_len);
+            off = fp->iov_len - fp->iov[1].iov_len;
+            ASSERT(off < udp_mtu);
+            sub = udp_mtu - off;
+            ASSERT(sub < fp->iov[1].iov_len);
+            fp->iov[1].iov_base += sub;
+            fp->iov[1].iov_len -= sub;
+            fp->iov_count = 2;
+            fp->iov_len -= ext_len - sizeof(fp->udphdr);
+        }
+        else {
+            /* all buffered data sent */
+            fp->iov_count = 1;
+            fp->iov_len = sizeof(fp->udphdr);
+            break;
+        }
+    }
+
+    if (fp->iov_count == ARRAY_SIZE(fp->iov)) {
+        /* iov is full, send partial packet */
+        daemon_udpstr_flush(fp, udp_mtu);
+    }
+}
+
 void *
 daemon_sendthread_start(void *ptr)
 {
@@ -1812,9 +2007,13 @@ daemon_sendthread_start(void *ptr)
     struct daemon_ctx *fp = ptr;
     struct daemon_ring_ctx *rctx = &daemon_ring_ctx;
     struct daemon_pkt_entry *entry;
-    unsigned int idx, endidx;
+    unsigned int idx, endidx, tail;
     unsigned int head_bufidx;
     unsigned int nbytes;
+    unsigned int bytes_budget = daemon_ringbuf_len / 16;
+    unsigned int idx_budget = (daemon_ring_mask + 1) / 16;
+    unsigned int udp_mtu = rpcapd_opt.udp_mtu;
+    unsigned int ring_mask = daemon_ring_mask;
 
     daemon_set_cpu_and_nice(rpcapd_opt.cpu_affinity_udp,
                             rpcapd_opt.nice_udp);
@@ -1826,34 +2025,35 @@ daemon_sendthread_start(void *ptr)
         nbytes = 0;
         idx = rctx->head;
         head_bufidx = rctx->head_bufidx;
-        endidx = rctx->tail;
+        tail = endidx = rctx->tail;
+        if (((endidx - idx) & ring_mask) > idx_budget) {
+            endidx = (idx + idx_budget) & ring_mask;
+        }
         rmb();
-        while ((nbytes < 131072) && (idx != endidx)) {
+        while ((idx != endidx) && (nbytes < bytes_budget)) {
             entry = &daemon_ring[idx];
-            if (entry->buf_idx < 0) {
-                SOCK_ASSERT("bad ring entry->buf_idx < 0", 1);
-                exit(1);
-            }
+            ASSERT(entry->buf_idx >= 0);
             if (entry->buf_idx != head_bufidx) {
-                printf("head wrap entry->buf_idx=%d head_bufidx=%u\n",
-                       entry->buf_idx, head_bufidx);
+                // printf("head wrap entry->buf_idx=%d head_bufidx=%u\n",
+                //        entry->buf_idx, head_bufidx);
                 /* a pkt can't wrap the end of the buffer, so advance to zero */
-                if (entry->buf_idx != 0) {
-                    SOCK_ASSERT("bad ring entry->buf_idx != 0", 1);
-                    exit(1);
-                }
+                ASSERT(entry->buf_idx == 0);
                 nbytes += daemon_ringbuf_len - head_bufidx;
             }
-            if (entry->len < (sizeof(struct rpcap_header) +
-                              sizeof(struct rpcap_pkthdr))) {
-                SOCK_ASSERT("bad ring entry->len", 1);
-                exit(1);
-            }
+            ASSERT(entry->len >= sizeof(struct rpcap_pkthdr));
             nbytes += entry->len;
-            daemon_send_udp(fp, &daemon_ringbuf[entry->buf_idx], entry->len);
+            if (udp_mtu) {
+                daemon_udpstr_write(fp, NULL, &daemon_ringbuf[entry->buf_idx],
+                                    entry->len, udp_mtu);
+            }
+            else {
+                daemon_send_udp(fp, &daemon_ringbuf[entry->buf_idx],
+                                entry->len);
+            }
             head_bufidx = entry->buf_idx + entry->len;
-            idx = (idx + 1) & daemon_ring_mask;
+            idx = (idx + 1) & ring_mask;
         }
+        daemon_udpstr_flush(fp, udp_mtu);
         rctx->head = idx;
         rctx->head_bufidx = head_bufidx;
         rctx->head_nbytes += nbytes;
@@ -1899,18 +2099,25 @@ daemon_sendthread_start(void *ptr)
     }
 }
 
+/**
+ * If pkt_data is NULL, only put the headers into dst.
+ */
 static void
 daemon_build_udp(struct daemon_ctx *fp, const struct pcap_pkthdr *pkt_header,
-                 const u_char *pkt_data, unsigned int caplen,
-                 char *dst)
+                 const u_char *pkt_data, char *dst, unsigned int caplen,
+                 unsigned int udp_mtu)
 {
     struct rpcap_pkthdr *net_pkt_header;
+    unsigned int len = 0;
 
-    rpcap_createhdr( (struct rpcap_header *)&dst[0],
-                    RPCAP_MSG_PACKET, 0,
-                    (uint16)(sizeof(struct rpcap_pkthdr) + caplen));
+    if (udp_mtu == 0) {
+        rpcap_createhdr( (struct rpcap_header *)&dst[0],
+                        RPCAP_MSG_PACKET, 0,
+                        (uint16)(sizeof(struct rpcap_pkthdr) + caplen));
+        len = sizeof(struct rpcap_header);
+    }
 
-    net_pkt_header= (struct rpcap_pkthdr *) &dst[sizeof(struct rpcap_header)];
+    net_pkt_header= (struct rpcap_pkthdr *) &dst[len];
 
     net_pkt_header->caplen= htonl(caplen);
     net_pkt_header->len= htonl(pkt_header->len);
@@ -1922,8 +2129,10 @@ daemon_build_udp(struct daemon_ctx *fp, const struct pcap_pkthdr *pkt_header,
         fp->ds.pcap_max_caplen = caplen;
     }
 
-    memcpy(&dst[sizeof(struct rpcap_header) + sizeof(struct rpcap_pkthdr)],
-           pkt_data, caplen);
+    len += sizeof(struct rpcap_pkthdr);
+    if (pkt_data != NULL) {
+        memcpy(&dst[len], pkt_data, caplen);
+    }
 }
 
 static void
@@ -1939,19 +2148,25 @@ daemon_dispatch_cb_threaded(u_char *usr, const struct pcap_pkthdr *pkt_header,
     unsigned int nbytes;
     int sleep_budget = 100;
     unsigned int caplen = pkt_header->caplen;
+    unsigned int udp_mtu = rpcapd_opt.udp_mtu;
 
  again:
     tail_bufidx = rctx->tail_bufidx;
-    len = sizeof(struct rpcap_header) + sizeof(struct rpcap_pkthdr) + caplen;
+    len = sizeof(struct rpcap_pkthdr) + caplen;
+    if (udp_mtu == 0) {
+        len += sizeof(struct rpcap_header);
+    }
     nbytes = len;
     if (tail_bufidx + len > daemon_ringbuf_len) {
         /* a pkt can't wrap the end of the buffer, so advance to zero */
-        printf("tail wrap, tail_bufidx=%u len=%u\n", tail_bufidx, len);
+        // printf("tail wrap, tail_bufidx=%u len=%u\n", tail_bufidx, len);
         nbytes += daemon_ringbuf_len - tail_bufidx;
         tail_bufidx = 0;
     }
     if (rctx->tail_nbytes + nbytes - rctx->head_nbytes > daemon_ringbuf_len) {
+#if DAEMON_USE_COND_TIMEDWAIT
         pthread_cond_signal(&rctx->send_cv);
+#endif
         if (--sleep_budget == 0) {
             fp->ds.sendring_buf_full++;
             return;
@@ -1962,7 +2177,9 @@ daemon_dispatch_cb_threaded(u_char *usr, const struct pcap_pkthdr *pkt_header,
     }
     new_tail = (rctx->tail + 1) & daemon_ring_mask;
     if (new_tail == rctx->head) {
+#if DAEMON_USE_COND_TIMEDWAIT
         pthread_cond_signal(&rctx->send_cv);
+#endif
         if (--sleep_budget == 0) {
             fp->ds.sendring_full++;
             return;
@@ -1975,8 +2192,8 @@ daemon_dispatch_cb_threaded(u_char *usr, const struct pcap_pkthdr *pkt_header,
     entry->buf_idx = tail_bufidx;
     entry->len = len;
 
-    daemon_build_udp(fp, pkt_header, pkt_data, caplen,
-                     &daemon_ringbuf[tail_bufidx]);
+    daemon_build_udp(fp, pkt_header, pkt_data, &daemon_ringbuf[tail_bufidx],
+                     caplen, udp_mtu);
 
     rctx->tail_nbytes += nbytes;
     rctx->tail_bufidx = tail_bufidx + len;
@@ -2038,12 +2255,49 @@ daemon_dispatch_cb_single_thr(u_char *usr, const struct pcap_pkthdr *pkt_header,
     struct daemon_ctx *fp = (struct daemon_ctx *)usr;
     unsigned int caplen = pkt_header->caplen;
     unsigned int len;
+    unsigned int udp_mtu = rpcapd_opt.udp_mtu;
 
-    len = sizeof(struct rpcap_header) + sizeof(struct rpcap_pkthdr) + caplen;
-
-    daemon_build_udp(fp, pkt_header, pkt_data, caplen, fp->sendbuf);
-
-    daemon_send_udp(fp, fp->sendbuf, len);
+    if (udp_mtu == 0) {
+        char hdrbuf[sizeof(struct rpcap_header) + sizeof(struct rpcap_pkthdr)];
+        daemon_build_udp(fp, pkt_header, NULL, hdrbuf, caplen, udp_mtu);
+        fp->iov[0].iov_base = hdrbuf;
+        fp->iov[0].iov_len = ARRAY_SIZE(hdrbuf);
+        fp->iov[1].iov_base = (void *)pkt_data;
+        fp->iov[1].iov_len = caplen;
+        fp->iov_count = 2;
+        fp->iov_len = ARRAY_SIZE(hdrbuf) + caplen;
+        daemon_sendv_udp(fp, ARRAY_SIZE(hdrbuf) + caplen, 2);
+    }
+    else {
+        struct rpcap_pkthdr pkthdrbuf;
+        daemon_build_udp(fp, pkt_header, NULL, (char *)&pkthdrbuf,
+                         caplen, udp_mtu);
+        daemon_udpstr_write(fp, &pkthdrbuf, (char *)pkt_data, caplen, udp_mtu);
+        if (fp->iov_count > 1) {
+            struct iovec *iov;
+            /*
+             * If udpstr_write didn't send all the data, move it onto
+             * fp->sendbuf because pkt_data will be invalid after this
+             * callback returns.
+             */
+            iov = &fp->iov[fp->iov_count - 2];
+            if (iov->iov_base == &pkthdrbuf) {
+                memcpy(fp->sendbuf + fp->sendbufidx, &pkthdrbuf,
+                       sizeof(struct rpcap_pkthdr));
+                iov->iov_base = fp->sendbuf + fp->sendbufidx;
+                fp->sendbufidx += sizeof(struct rpcap_pkthdr);
+            }
+            iov = &fp->iov[fp->iov_count - 1];
+            if ((iov->iov_base >= (void *)pkt_data) &&
+                (iov->iov_base < ((void *)pkt_data) + caplen)) {
+                memcpy(fp->sendbuf + fp->sendbufidx, iov->iov_base,
+                       iov->iov_len);
+                iov->iov_base = fp->sendbuf + fp->sendbufidx;
+                fp->sendbufidx += iov->iov_len;
+            }
+            ASSERT(fp->sendbufidx <= udp_mtu);
+        }
+    }
 }
 
 void *daemon_thrdatamain(void *ptr)
@@ -2066,6 +2320,17 @@ pcap_handler dispatch_cb = daemon_dispatch_cb_threaded;
 
 	memset(&fp->ds, 0, sizeof(struct daemon_ctx_stats));
 	fp->cb_rc = 0;
+	memset(&fp->udphdr, 0, sizeof(fp->udphdr));
+	fp->udphdr.ver = RPCAP_VERSION;
+	fp->udphdr.type = RPCAP_MSG_UDPSTR_PACKET;
+	fp->udp_firsthdr = UDPSTR_FIRSTHDR_NONE;
+	fp->udp_seqno = 0;
+	memset(&fp->msghdr, 0, sizeof(fp->msghdr));
+	fp->msghdr.msg_iov = &fp->iov;
+	fp->iov[0].iov_base = &fp->udphdr;
+	fp->iov[0].iov_len = sizeof(fp->udphdr);
+	fp->iov_len = sizeof(fp->udphdr);
+	fp->iov_count = 1;
 
 	// Initialize errbuf
 	memset(errbuf, 0, sizeof(errbuf) );
@@ -2076,7 +2341,17 @@ pcap_handler dispatch_cb = daemon_dispatch_cb_threaded;
 	pthread_cond_init(&daemon_ring_ctx.send_cv, NULL);
 	daemon_sendthread_done = 0;
 
-	if (!rpcapd_opt.single_threaded) {
+
+	if (rpcapd_opt.single_threaded) {
+        fp->sendbufidx = 0;
+        fp->sendbuf = malloc(rpcapd_opt.udp_mtu);
+        if (fp->sendbuf == NULL) {
+            snprintf(errbuf, PCAP_ERRBUF_SIZE, "Error allocating sendbuf");
+            rpcap_senderror(fp->rmt_sockctrl, errbuf, PCAP_ERR_READEX, NULL);
+            goto error;
+        }
+	}
+	else {
 	    if (daemon_ringbuf_init(fp, errbuf) != 0) {
 	        goto error;
 	    }
@@ -2104,15 +2379,13 @@ pcap_handler dispatch_cb = daemon_dispatch_cb_threaded;
 	daemon_set_cpu_and_nice(rpcapd_opt.cpu_affinity_pcap,
 	                        rpcapd_opt.nice_pcap);
 
+	if (rpcapd_opt.udp_mtu > 0) {
+	    printf("udp mtu %u\n", rpcapd_opt.udp_mtu);
+	}
+
 	if (rpcapd_opt.single_threaded) {
 	    printf("Starting in single-threaded mode\n");
 	    dispatch_cb = daemon_dispatch_cb_single_thr;
-	    fp->sendbuf = malloc(66000);
-	    if (fp->sendbuf == NULL) {
-	        snprintf(errbuf, PCAP_ERRBUF_SIZE, "Error allocating sendbuf");
-	        rpcap_senderror(fp->rmt_sockctrl, errbuf, PCAP_ERR_READEX, NULL);
-	        goto error;
-	    }
 	}
 	else {
         printf("Starting packet sending thread\n");
@@ -2131,6 +2404,9 @@ pcap_handler dispatch_cb = daemon_dispatch_cb_threaded;
 	                               (u_char *)fp)) >= 0)
 	{
 		if (retval == 0) {	// Read timeout elapsed
+		    if (rpcapd_opt.single_threaded) {
+		        daemon_udpstr_flush(fp, rpcapd_opt.udp_mtu);
+		    }
 		    fp->ds.pcap_read_timeouts++;
 			continue;
 		}

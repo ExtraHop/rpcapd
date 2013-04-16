@@ -49,6 +49,7 @@ struct active_pars
 };
 
 struct rpcapd_opt {
+    unsigned int udp_mtu;
     int pcap_buffer_size;
     int ringbuf_max_pkt_data;
     int ringbuf_max_pkts;

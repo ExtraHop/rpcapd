@@ -278,7 +278,15 @@ struct rpcap_sampling
 	uint32 value;		//!< Parameter related to the sampling method
 };
 
+//! UDP Stream header
+struct rpcap_udpstr_header {
+    uint8_t ver;            //!< matches rpcap_header version number
+    uint8_t type;           //!< matches rpcap_header type
+    uint16_t firsthdridx;
+    uint32_t seqno;
+};
 
+#define UDPSTR_FIRSTHDR_NONE    UINT16_MAX
 
 // Messages field coding
 #define RPCAP_MSG_ERROR 1				/*!< Message that keeps an error notification */
@@ -292,6 +300,8 @@ struct rpcap_sampling
 #define RPCAP_MSG_STATS_REQ 9			/*!< It requires to have network statistics */
 #define RPCAP_MSG_ENDCAP_REQ 10			/*!< Stops the current capture, keeping the device open */
 #define RPCAP_MSG_SETSAMPLING_REQ 11	/*!< Sset sampling parameters */
+
+#define RPCAP_MSG_UDPSTR_PACKET 110
 
 #define RPCAP_MSG_FINDALLIF_REPLY	(128+RPCAP_MSG_FINDALLIF_REQ)		/*!< Keeps the list of all the remote interfaces */
 #define RPCAP_MSG_OPEN_REPLY		(128+RPCAP_MSG_OPEN_REQ)			/*!< The remote device has been opened correctly */
