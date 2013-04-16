@@ -45,6 +45,7 @@
 #include <unistd.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/uio.h>
 #include <pwd.h>		// for password management
 
 int
@@ -55,6 +56,11 @@ set_non_blocking(int fd)
     return fcntl(fd, F_SETFL, flags);
 }
 
+#define ex_iovec    iovec
+#define ex_iov_base iov_base
+#define ex_iov_len  iov_len
+#define ex_writev   writev
+
 #else
 
 #define ENOBUFS WSAENOBUFS
@@ -64,6 +70,21 @@ set_non_blocking(int fd)
 {
     printf("WARNING: %s(fd=%d) not implemented on this platform\n",
            __func__, fd);
+}
+
+#define ex_iovec    __WSABUF
+#define ex_iov_base buf
+#define ex_iov_len  len
+
+ssize_t
+ex_writev(SOCKET s, struct ex_iovec *iov, int iov_count)
+{
+    DWORD bytes_sent;
+    int rc = WSASend(s, iov, iov_count, &bytes_sent, 0, NULL, NULL);
+    if (rc != 0) {
+        return rc;
+    }
+    return bytes_sent;
 }
 
 #endif
@@ -122,8 +143,7 @@ struct daemon_ctx {
     unsigned int sendbufidx;
     unsigned int iov_len;
     unsigned int iov_count;
-    struct iovec iov[32]; /* iov[0] is for the udpstr header */
-    struct msghdr msghdr;
+    struct ex_iovec iov[32]; /* iov[0] is for the udpstr header */
 };
 
 pcap_t *pcap_open_live_ex(const char *source, int buffer_size, int snaplen, int promisc, int to_ms, char *errbuf)
@@ -1848,8 +1868,8 @@ daemon_send_udp(struct daemon_ctx *fp, const char *buf, unsigned int len)
 }
 
 static void
-daemon_sendv_udp(struct daemon_ctx *fp, unsigned int iov_len,
-                 unsigned int iov_count)
+daemon_sendv_udp(struct daemon_ctx *fp, struct ex_iovec *iov,
+                 unsigned int iov_count, unsigned int iov_len)
 {
     int sleep_budget = 100;
     ssize_t wlen;
@@ -1858,12 +1878,11 @@ daemon_sendv_udp(struct daemon_ctx *fp, unsigned int iov_len,
         return;
     }
 
-    fp->msghdr.msg_iovlen = iov_count;
     fp->udphdr.firsthdridx = htons(fp->udp_firsthdr);
     fp->udphdr.seqno = htonl(fp->udp_seqno);
 
  again:
-    wlen = sendmsg(fp->rmt_sockdata, &fp->msghdr, 0);
+    wlen = ex_writev(fp->rmt_sockdata, iov, iov_count);
     if (unlikely(wlen != iov_len)) {
         if (errno == EAGAIN) {
             if (--sleep_budget == 0) {
@@ -1910,7 +1929,7 @@ daemon_udpstr_flush(struct daemon_ctx *fp, unsigned int udp_mtu)
         return;
     }
     ASSERT(fp->iov_len <= udp_mtu);
-    daemon_sendv_udp(fp, fp->iov_len, fp->iov_count);
+    daemon_sendv_udp(fp, fp->iov, fp->iov_count, fp->iov_len);
     fp->udp_firsthdr = UDPSTR_FIRSTHDR_NONE;
     fp->udp_seqno++;
     fp->iov_count = 1;
@@ -1943,13 +1962,13 @@ daemon_udpstr_write(struct daemon_ctx *fp, struct rpcap_pkthdr *pkthdr,
         fp->udp_firsthdr = fp->iov_len;
     }
     if (pkthdr != NULL) {
-        fp->iov[fp->iov_count].iov_base = pkthdr;
-        fp->iov[fp->iov_count].iov_len = sizeof(struct rpcap_pkthdr);
+        fp->iov[fp->iov_count].ex_iov_base = pkthdr;
+        fp->iov[fp->iov_count].ex_iov_len = sizeof(struct rpcap_pkthdr);
         fp->iov_len += sizeof(struct rpcap_pkthdr);
         fp->iov_count++;
     }
-    fp->iov[fp->iov_count].iov_base = buf;
-    fp->iov[fp->iov_count].iov_len = len;
+    fp->iov[fp->iov_count].ex_iov_base = buf;
+    fp->iov[fp->iov_count].ex_iov_len = len;
     fp->iov_len += len;
     fp->iov_count++;
 
@@ -1959,14 +1978,14 @@ daemon_udpstr_write(struct daemon_ctx *fp, struct rpcap_pkthdr *pkthdr,
         if (fp->iov_len > udp_mtu) {
             sub = fp->iov_len - udp_mtu;
             ASSERT(fp->iov_count > 1);
-            ASSERT(fp->iov[fp->iov_count - 1].iov_len > sub);
-            fp->iov[fp->iov_count - 1].iov_len -= sub;
+            ASSERT(fp->iov[fp->iov_count - 1].ex_iov_len > sub);
+            fp->iov[fp->iov_count - 1].ex_iov_len -= sub;
             ext_len = udp_mtu;
         }
         else {
             ext_len = fp->iov_len;
         }
-        daemon_sendv_udp(fp, ext_len, fp->iov_count);
+        daemon_sendv_udp(fp, fp->iov, fp->iov_count, ext_len);
         fp->udp_firsthdr = UDPSTR_FIRSTHDR_NONE;
         fp->udp_seqno++;
         fp->sendbufidx = 0;
@@ -1975,14 +1994,14 @@ daemon_udpstr_write(struct daemon_ctx *fp, struct rpcap_pkthdr *pkthdr,
             if (fp->iov_count > 2) {
                 fp->iov[1] = fp->iov[fp->iov_count - 1];
             }
-            fp->iov[1].iov_len += sub;
-            ASSERT(fp->iov_len > fp->iov[1].iov_len);
-            off = fp->iov_len - fp->iov[1].iov_len;
+            fp->iov[1].ex_iov_len += sub;
+            ASSERT(fp->iov_len > fp->iov[1].ex_iov_len);
+            off = fp->iov_len - fp->iov[1].ex_iov_len;
             ASSERT(off < udp_mtu);
             sub = udp_mtu - off;
-            ASSERT(sub < fp->iov[1].iov_len);
-            fp->iov[1].iov_base += sub;
-            fp->iov[1].iov_len -= sub;
+            ASSERT(sub < fp->iov[1].ex_iov_len);
+            fp->iov[1].ex_iov_base += sub;
+            fp->iov[1].ex_iov_len -= sub;
             fp->iov_count = 2;
             fp->iov_len -= ext_len - sizeof(fp->udphdr);
         }
@@ -2260,13 +2279,13 @@ daemon_dispatch_cb_single_thr(u_char *usr, const struct pcap_pkthdr *pkt_header,
     if (udp_mtu == 0) {
         char hdrbuf[sizeof(struct rpcap_header) + sizeof(struct rpcap_pkthdr)];
         daemon_build_udp(fp, pkt_header, NULL, hdrbuf, caplen, udp_mtu);
-        fp->iov[0].iov_base = hdrbuf;
-        fp->iov[0].iov_len = ARRAY_SIZE(hdrbuf);
-        fp->iov[1].iov_base = (void *)pkt_data;
-        fp->iov[1].iov_len = caplen;
+        fp->iov[0].ex_iov_base = hdrbuf;
+        fp->iov[0].ex_iov_len = ARRAY_SIZE(hdrbuf);
+        fp->iov[1].ex_iov_base = (void *)pkt_data;
+        fp->iov[1].ex_iov_len = caplen;
         fp->iov_count = 2;
         fp->iov_len = ARRAY_SIZE(hdrbuf) + caplen;
-        daemon_sendv_udp(fp, ARRAY_SIZE(hdrbuf) + caplen, 2);
+        daemon_sendv_udp(fp, fp->iov, 2, ARRAY_SIZE(hdrbuf) + caplen);
     }
     else {
         struct rpcap_pkthdr pkthdrbuf;
@@ -2274,26 +2293,26 @@ daemon_dispatch_cb_single_thr(u_char *usr, const struct pcap_pkthdr *pkt_header,
                          caplen, udp_mtu);
         daemon_udpstr_write(fp, &pkthdrbuf, (char *)pkt_data, caplen, udp_mtu);
         if (fp->iov_count > 1) {
-            struct iovec *iov;
+            struct ex_iovec *iov;
             /*
              * If udpstr_write didn't send all the data, move it onto
              * fp->sendbuf because pkt_data will be invalid after this
              * callback returns.
              */
             iov = &fp->iov[fp->iov_count - 2];
-            if (iov->iov_base == &pkthdrbuf) {
+            if (iov->ex_iov_base == &pkthdrbuf) {
                 memcpy(fp->sendbuf + fp->sendbufidx, &pkthdrbuf,
                        sizeof(struct rpcap_pkthdr));
-                iov->iov_base = fp->sendbuf + fp->sendbufidx;
+                iov->ex_iov_base = fp->sendbuf + fp->sendbufidx;
                 fp->sendbufidx += sizeof(struct rpcap_pkthdr);
             }
             iov = &fp->iov[fp->iov_count - 1];
-            if ((iov->iov_base >= (void *)pkt_data) &&
-                (iov->iov_base < ((void *)pkt_data) + caplen)) {
-                memcpy(fp->sendbuf + fp->sendbufidx, iov->iov_base,
-                       iov->iov_len);
-                iov->iov_base = fp->sendbuf + fp->sendbufidx;
-                fp->sendbufidx += iov->iov_len;
+            if ((iov->ex_iov_base >= (void *)pkt_data) &&
+                (iov->ex_iov_base < ((void *)pkt_data) + caplen)) {
+                memcpy(fp->sendbuf + fp->sendbufidx, iov->ex_iov_base,
+                       iov->ex_iov_len);
+                iov->ex_iov_base = fp->sendbuf + fp->sendbufidx;
+                fp->sendbufidx += iov->ex_iov_len;
             }
             ASSERT(fp->sendbufidx <= udp_mtu);
         }
@@ -2325,10 +2344,8 @@ pcap_handler dispatch_cb = daemon_dispatch_cb_threaded;
 	fp->udphdr.type = RPCAP_MSG_UDPSTR_PACKET;
 	fp->udp_firsthdr = UDPSTR_FIRSTHDR_NONE;
 	fp->udp_seqno = 0;
-	memset(&fp->msghdr, 0, sizeof(fp->msghdr));
-	fp->msghdr.msg_iov = &fp->iov;
-	fp->iov[0].iov_base = &fp->udphdr;
-	fp->iov[0].iov_len = sizeof(fp->udphdr);
+	fp->iov[0].ex_iov_base = &fp->udphdr;
+	fp->iov[0].ex_iov_len = sizeof(fp->udphdr);
 	fp->iov_len = sizeof(fp->udphdr);
 	fp->iov_count = 1;
 
