@@ -56,7 +56,7 @@ set_non_blocking(int fd)
     return fcntl(fd, F_SETFL, flags);
 }
 
-#define ex_iovec    iovec
+#define ex_iovec    struct iovec
 #define ex_iov_base iov_base
 #define ex_iov_len  iov_len
 #define ex_writev   writev
@@ -72,12 +72,12 @@ set_non_blocking(int fd)
            __func__, fd);
 }
 
-#define ex_iovec    __WSABUF
+#define ex_iovec    WSABUF
 #define ex_iov_base buf
 #define ex_iov_len  len
 
 ssize_t
-ex_writev(SOCKET s, struct ex_iovec *iov, int iov_count)
+ex_writev(SOCKET s, ex_iovec *iov, int iov_count)
 {
     DWORD bytes_sent;
     int rc = WSASend(s, iov, iov_count, &bytes_sent, 0, NULL, NULL);
@@ -143,7 +143,7 @@ struct daemon_ctx {
     unsigned int sendbufidx;
     unsigned int iov_len;
     unsigned int iov_count;
-    struct ex_iovec iov[32]; /* iov[0] is for the udpstr header */
+    ex_iovec iov[32]; /* iov[0] is for the udpstr header */
 };
 
 pcap_t *pcap_open_live_ex(const char *source, int buffer_size, int snaplen, int promisc, int to_ms, char *errbuf)
@@ -1868,7 +1868,7 @@ daemon_send_udp(struct daemon_ctx *fp, const char *buf, unsigned int len)
 }
 
 static void
-daemon_sendv_udp(struct daemon_ctx *fp, struct ex_iovec *iov,
+daemon_sendv_udp(struct daemon_ctx *fp, ex_iovec *iov,
                  unsigned int iov_count, unsigned int iov_len)
 {
     int sleep_budget = 100;
@@ -2293,7 +2293,7 @@ daemon_dispatch_cb_single_thr(u_char *usr, const struct pcap_pkthdr *pkt_header,
                          caplen, udp_mtu);
         daemon_udpstr_write(fp, &pkthdrbuf, (char *)pkt_data, caplen, udp_mtu);
         if (fp->iov_count > 1) {
-            struct ex_iovec *iov;
+            ex_iovec *iov;
             /*
              * If udpstr_write didn't send all the data, move it onto
              * fp->sendbuf because pkt_data will be invalid after this
