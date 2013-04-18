@@ -129,6 +129,7 @@ struct daemon_ctx {
     int rmt_capstarted;         //!< 'true' if the capture is already started (needed to knoe if we have to call the pcap_startcapture()
     struct pcap_samp rmt_samp;  //!< Keeps the parameters related to the sampling process.
     char *currentfilter;        //!< Pointer to a buffer (allocated at run-time) that stores the current filter. Needed when flag PCAP_OPENFLAG_NOCAPTURE_RPCAP is turned on.
+    char dispatch_thr_started;
 
     struct daemon_ctx_stats ds;
     struct daemon_ctx_stats prev_ds;
@@ -403,6 +404,11 @@ auth_again:
 				rpcap_senderror(pars->sockctrl, "The RPCAP runtime timeout has expired", PCAP_ERR_RUNTIMETIMEOUT, NULL);
 				goto end;
 			}
+		}
+		if ((fp != NULL) && fp->dispatch_thr_started && (fp->rmt_sockdata == 0)) {
+		    // dispatch thread exited - exit ourselves
+		    snprintf(errbuf, PCAP_ERRBUF_SIZE, "dispatch thread exited");
+		    goto end;
 		}
 
 		if (sock_recv(pars->sockctrl, (char *) &header, sizeof(struct rpcap_header), SOCK_RECEIVEALL_YES, errbuf, PCAP_ERRBUF_SIZE) == -1)
@@ -1856,7 +1862,9 @@ daemon_send_udp(struct daemon_ctx *fp, const char *buf, unsigned int len)
             }
         }
         else {
-            perror("WARNING: send(udp_fd) failed");
+            snprintf(fp->errbuf, PCAP_ERRBUF_SIZE,
+                     "send(udp_fd) failed: %s", strerror(errno));
+            perror("ERROR: send(udp_fd) failed");
             fp->ds.udp_senderr++;
             fp->cb_rc = -1;
         }
@@ -1909,7 +1917,9 @@ daemon_sendv_udp(struct daemon_ctx *fp, ex_iovec *iov,
                    wlen, iov_len);
         }
         else {
-            perror("WARNING: send(udp_fd) failed");
+            snprintf(fp->errbuf, PCAP_ERRBUF_SIZE,
+                     "send(udp_fd) failed: %s", strerror(errno));
+            perror("ERROR: send(udp_fd) failed");
             fp->ds.udp_senderr++;
             fp->cb_rc = -1;
         }
@@ -2336,6 +2346,7 @@ pcap_handler dispatch_cb = daemon_dispatch_cb_threaded;
 
 
 	fp= (struct daemon_ctx *) ptr;
+    fp->dispatch_thr_started = 1;
 
 	memset(&fp->ds, 0, sizeof(struct daemon_ctx_stats));
 	fp->cb_rc = 0;
@@ -2438,7 +2449,10 @@ pcap_handler dispatch_cb = daemon_dispatch_cb_threaded;
 
 	if (retval == -1)
 	{
-		snprintf(errbuf, PCAP_ERRBUF_SIZE, "Error reading the packets: %s", pcap_geterr(fp->fp) );
+	    if (errbuf[0] == '\0') {
+	        snprintf(errbuf, PCAP_ERRBUF_SIZE, "Error reading the packets: %s",
+	                 pcap_geterr(fp->fp));
+	    }
 		rpcap_senderror(fp->rmt_sockctrl, errbuf, PCAP_ERR_READEX, NULL);
 		goto error;
 	}
