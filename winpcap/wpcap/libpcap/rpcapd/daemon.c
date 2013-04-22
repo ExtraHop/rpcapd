@@ -63,6 +63,8 @@ set_non_blocking(int fd)
 
 #else
 
+#include <sec_api/time_s.h>
+
 #define ENOBUFS WSAENOBUFS
 
 int
@@ -1688,7 +1690,11 @@ ex_assert(const char *file, int line, const char *func, const char *strx)
 {
     time_t t = time(NULL);
     char tstr[26] = {0};
+#ifdef WIN32
+    _ctime64_s(tstr, 26, &t);
+#else
     ctime_r(&t, tstr);
+#endif
     tstr[24] = '\0';
     fprintf(stderr, "%s: %s:%d:%s: Assertion '%s' failed\n",
             tstr, file, line, func, strx);
