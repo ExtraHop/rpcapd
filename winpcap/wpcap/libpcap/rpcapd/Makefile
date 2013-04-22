@@ -12,13 +12,13 @@ WINCFLAGS   = -DHAVE_STRUCT_TIMESPEC
 #flags for debugging: -D_DEBUG -g -Wall
 
 INCLUDE    = -I../
-WININCLUDE = -I../Win32/Include -I../../../Common -Iwin32-pthreads
+WININCLUDE = -I../Win32/Include -I../../../Common -I../../../../win32-pthreads
 
 LINUXLIB = -lpcap -lcrypt -static
 WINLIB   = -lwpcap -lpthreadGC2 -lpacket -lws2_32
 
 LINUXLIBPATH = -L../
-WINLIBPATH   = -L../../lib -Lwin32-pthreads \
+WINLIBPATH   = -L../../lib -L../../../../win32-pthreads \
                -L../../../packetNtx/Dll/Project
 
 # Files that are needed to compile this project

@@ -278,7 +278,11 @@ struct rpcap_header header;				// RPCAP message general header
 struct daemon_ctx *fp= NULL;
 struct daemon_slpars *pars;				// parameters related to the present daemon loop
 
+#ifdef WIN32
+pthread_t threaddata= {0};				// handle to the 'read from daemon and send to client' thread
+#else
 pthread_t threaddata= 0;				// handle to the 'read from daemon and send to client' thread
+#endif
 
 unsigned int ifdrops, ifrecv, krnldrop, svrcapt;	// needed to save the values of the statistics
 
@@ -585,10 +589,18 @@ end:
 	// perform pcap_t cleanup, in case it has not been done
 	if (fp)
 	{
+#ifdef WIN32
+		if (threaddata.p)
+#else
 		if (threaddata)
+#endif
 		{
 			pthread_cancel(threaddata);
+#ifdef WIN32
+			threaddata.p= 0;
+#else
 			threaddata= 0;
+#endif
 		}
 		if (fp->rmt_sockdata)
 		{
