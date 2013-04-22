@@ -1,6 +1,8 @@
 # Makefile for cygwin gcc
 # Nate Lawson <nate@rootlabs.com>
 
+CC = x86_64-w64-mingw32-gcc
+
 # Set according to your system type
 SYSTYPE = "NT"
 # SYSTYPE = "9x"
@@ -32,12 +34,12 @@ CFLAGS = -I ../libpcap -I ../libpcap/bpf -I ../libpcap/lbl \
 	-DSIZEOF_CHAR=1 -DSIZEOF_SHORT=2 -DSIZEOF_INT=4 -DSIZEOF_LONG_LONG=8 -DWPCAP -D'_U_=' \
 	-DHAVE_SNPRINTF -DHAVE_VSNPRINTF \
 	-DSIZEOF_LONG_LONG=8 \
-	-DHAVE_REMOTE -DHAVE_AIRPCAP_API \
+	-DHAVE_REMOTE \
 	-DHAVE_TC_API \
 	-DHAVE_ADDRINFO \
 	-DHAVE_LIMITS_H \
 	-DYY_NO_UNISTD_H \
-	-mno-cygwin -shared ${OPTFLAGS}
+	-shared ${OPTFLAGS}
 LDFLAGS = -Wl,--out-implib,../lib/libwpcap.a
 LIBS = -L ../../${PACKET_DIR}/Dll/Project -lpacket -lws2_32
 OBJS = ../libpcap/bpf/net/bpf_filter.o \
