@@ -2550,7 +2550,7 @@ void daemon_seraddr(struct sockaddr_storage *sockaddrin, struct sockaddr_storage
 	{
 	struct sockaddr_ll *sockaddr;
 
-	    sockaddr= (struct sockaddr *)sockaddrin;
+	    sockaddr= (struct sockaddr_ll *)sockaddrin;
 	    sockaddr->sll_family = htons(sockaddr->sll_family);
 	    memcpy(sockaddrout, sockaddr, sizeof(struct sockaddr_ll));
 	}
