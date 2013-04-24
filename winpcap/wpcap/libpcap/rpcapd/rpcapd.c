@@ -86,8 +86,8 @@ void main_cleanup_childs(int sign);
 */
 void printusage()
 {
-	char *usagetext =
-	"USAGE:\n"
+	printf(
+    "USAGE:\n"
 	" "  PROGRAM_NAME " [-b <address>] [-p <port>] [-6] [-l <host_list>] [-a <host,port>]\n"
 	"        [-n] [-v] [-d] [-s <file>] [-f <file>]\n"
 	"  -b <address>: the address to bind to (either numeric or literal).\n"
@@ -122,9 +122,7 @@ void printusage()
 	"  -e -15,10    -- nice values of <pcap thread>,<send thread>\n"
 	"  -m <for multithreaded mode: ringbuf data buffer in MB>\n"
 	"  -k <for multithreaded mode: ringbuf npkts>\n"
-    "  -h: print this help screen\n\n";
-
-	printf(usagetext);
+    "  -h: print this help screen\n\n");
 }
 
 
@@ -208,12 +206,12 @@ int k;
 				{
 					tmpport= strtok(NULL, RPCAP_HOSTLIST_SEP);
 
-					snprintf(activelist[i].address, MAX_LINE, tmpaddress);
+					snprintf(activelist[i].address, MAX_LINE, "%s", tmpaddress);
 					
 					if ( (tmpport == NULL) || (strcmp(tmpport, "DEFAULT") == 0) ) // the user choose a custom port
 						snprintf(activelist[i].port, MAX_LINE, RPCAP_DEFAULT_NETPORT_ACTIVE);
 					else
-						snprintf(activelist[i].port, MAX_LINE, tmpport);
+						snprintf(activelist[i].port, MAX_LINE, "%s", tmpport);
 
 					tmpaddress = strtok(NULL, RPCAP_HOSTLIST_SEP);
 
