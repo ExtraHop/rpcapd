@@ -160,7 +160,9 @@ int k;
 	mainhints.ai_flags = AI_PASSIVE;	// Ready to a bind() socket
 	mainhints.ai_socktype = SOCK_STREAM;
 
+	rpcapd_opt.udp_mtu = 1472;
 	rpcapd_opt.pcap_buffer_size = 16777216;
+	rpcapd_opt.udp_sndbuf_size = 8388608;
 	rpcapd_opt.cpu_affinity_pcap = -1;
 	rpcapd_opt.cpu_affinity_udp = -1;
 	rpcapd_opt.nice_pcap = 1000;
