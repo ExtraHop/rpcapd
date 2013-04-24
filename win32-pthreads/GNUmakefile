@@ -457,6 +457,17 @@ GCD_STATIC_STAMP = libpthreadGC$(DLL_VERD).stamp
 
 PTHREAD_DEF	= pthread.def
 
+# BEGIN EXTRAHOP
+
+.PHONY: default
+default:
+	$(MAKE) CROSS=x86_64-w64-mingw32- clean GC-inlined
+
+.PHONY: distclean
+distclean: clean
+
+# END EXTRAHOP
+
 help:
 	@ echo "Run one of the following command lines:"
 	@ echo "make clean GC            (to build the GNU C dll with C cleanup code)"
