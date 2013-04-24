@@ -2450,7 +2450,7 @@ pcap_handler dispatch_cb = daemon_dispatch_cb_threaded;
 	                               (u_char *)fp)) >= 0)
 	{
 		if (retval == 0) {	// Read timeout elapsed
-		    if (rpcapd_opt.single_threaded) {
+		    if (rpcapd_opt.single_threaded && (rpcapd_opt.udp_mtu != 0)) {
 		        daemon_udpstr_flush(fp, rpcapd_opt.udp_mtu);
 		    }
 		    fp->ds.pcap_read_timeouts++;

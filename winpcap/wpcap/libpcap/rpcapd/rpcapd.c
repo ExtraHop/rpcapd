@@ -115,7 +115,10 @@ void printusage()
 	"  -g <udp socket blocking instead of non-blocking>\n"
 	"  -t <udp mtu size - enables non-standard mode>\n"
 	"  -c 'single'  -- single threaded mode\n"
-	"     '1,0'     -- cpu affinity for <pcap thread>,<send thread>\n"
+	"     '1'       -- single threaded mode, bound to cpu 1\n"
+	"     '1,0'     -- multithreaded mode, cpu affinity for\n"
+	"                      <pcap thread>,<send thread>\n"
+	"     '-1,-1'   -- multithreaded mode, no cpu binding\n"
 	"  -e -15,10    -- nice values of <pcap thread>,<send thread>\n"
 	"  -m <for multithreaded mode: ringbuf data buffer in MB>\n"
 	"  -k <for multithreaded mode: ringbuf npkts>\n"
@@ -164,6 +167,7 @@ int k;
 	rpcapd_opt.cpu_affinity_udp = -1;
 	rpcapd_opt.nice_pcap = 1000;
 	rpcapd_opt.nice_udp = 1000;
+	rpcapd_opt.single_threaded = 1;
 
 	// Getting the proper command line options
 	while ((retval = getopt(argc, argv, "b:dhp:4l:na:s:f:vyz:u:gc:e:m:k:t:")) != -1)
@@ -267,8 +271,13 @@ int k;
                     rpcapd_opt.single_threaded = 1;
                     break;
                 }
-                sscanf(optarg, "%d,%d", &rpcapd_opt.cpu_affinity_pcap,
-                       &rpcapd_opt.cpu_affinity_udp);
+                if (sscanf(optarg, "%d,%d", &rpcapd_opt.cpu_affinity_pcap,
+                           &rpcapd_opt.cpu_affinity_udp) < 2) {
+                    rpcapd_opt.single_threaded = 1;
+                }
+                else {
+                    rpcapd_opt.single_threaded = 0;
+                }
                 break;
             case 'e':
                 sscanf(optarg, "%d,%d", &rpcapd_opt.nice_pcap,
