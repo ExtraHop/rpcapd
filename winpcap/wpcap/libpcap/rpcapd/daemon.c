@@ -1577,36 +1577,39 @@ struct rpcap_stats *netstats;		// statistics sent on the network
 
 	struct daemon_ctx_stats ds = fp->ds;
 
-	printf("ifrecv=%u (%u)\t" "TotCapt=%u (%u)\t"
-	       "krnldrop=%u %u%% (%u %u%%)\t" "ifdrop=%u (%u)\n",
-	       (stats.ps_recv - fp->prev_ps.ps_recv), stats.ps_recv,
-	       (ds.pcap_dispatched - fp->prev_ds.pcap_dispatched),
-	               ds.pcap_dispatched,
-	       (stats.ps_drop - fp->prev_ps.ps_drop),
-	       ((stats.ps_recv - fp->prev_ps.ps_recv) == 0) ? 0 :
-	               ((stats.ps_drop - fp->prev_ps.ps_drop) * 100) /
-	                       (stats.ps_recv - fp->prev_ps.ps_recv),
-	       stats.ps_drop,
-	       (stats.ps_recv == 0) ? 0 :
-	               (stats.ps_drop * 100) / stats.ps_recv,
-	       (stats.ps_ifdrop - fp->prev_ps.ps_ifdrop), stats.ps_ifdrop);
-	if (!rpcapd_opt.single_threaded) {
-        printf("    sendring_full=%u (%u sleep)\t"
-               "sendring_buf_full=%u (%u sleep)\t"
-               "sendthr empty sleep=%u\n",
-               ds.sendring_full, ds.sendring_full_sleep,
-               ds.sendring_buf_full, ds.sendring_buf_full_sleep,
-               ds.sendring_empty_sleep);
-	}
-	printf("sent=%u (%u)\t" "sentbytes=%u (%u)\t" "eagain=%u (%u sleep)\t"
-           "enobufs=%u (%u sleep)\t" "senderr=%u\n",
-	       (ds.udp_pkts - fp->prev_ds.udp_pkts), ds.udp_pkts,
-	       (ds.udp_bytes - fp->prev_ds.udp_bytes), ds.udp_bytes,
-	       ds.udp_eagain, ds.udp_eagain_sleep,
-	       ds.udp_enobufs, ds.udp_enobufs_sleep,
-	       ds.udp_senderr);
-	printf("    max_dispatch=%u max_caplen=%u read_timeout=%u\n",
-	       ds.pcap_max_dispatched, ds.pcap_max_caplen, ds.pcap_read_timeouts);
+    if (rpcapd_opt.print_stats) {
+        printf("ifrecv=%u (%u)\t" "TotCapt=%u (%u)\t"
+               "krnldrop=%u %u%% (%u %u%%)\t" "ifdrop=%u (%u)\n",
+               (stats.ps_recv - fp->prev_ps.ps_recv), stats.ps_recv,
+               (ds.pcap_dispatched - fp->prev_ds.pcap_dispatched),
+                       ds.pcap_dispatched,
+               (stats.ps_drop - fp->prev_ps.ps_drop),
+               ((stats.ps_recv - fp->prev_ps.ps_recv) == 0) ? 0 :
+                       ((stats.ps_drop - fp->prev_ps.ps_drop) * 100) /
+                               (stats.ps_recv - fp->prev_ps.ps_recv),
+               stats.ps_drop,
+               (stats.ps_recv == 0) ? 0 :
+                       (stats.ps_drop * 100) / stats.ps_recv,
+               (stats.ps_ifdrop - fp->prev_ps.ps_ifdrop), stats.ps_ifdrop);
+        if (!rpcapd_opt.single_threaded) {
+            printf("    sendring_full=%u (%u sleep)\t"
+                   "sendring_buf_full=%u (%u sleep)\t"
+                   "sendthr empty sleep=%u\n",
+                   ds.sendring_full, ds.sendring_full_sleep,
+                   ds.sendring_buf_full, ds.sendring_buf_full_sleep,
+                   ds.sendring_empty_sleep);
+        }
+        printf("sent=%u (%u)\t" "sentbytes=%u (%u)\t" "eagain=%u (%u sleep)\t"
+               "enobufs=%u (%u sleep)\t" "senderr=%u\n",
+               (ds.udp_pkts - fp->prev_ds.udp_pkts), ds.udp_pkts,
+               (ds.udp_bytes - fp->prev_ds.udp_bytes), ds.udp_bytes,
+               ds.udp_eagain, ds.udp_eagain_sleep,
+               ds.udp_enobufs, ds.udp_enobufs_sleep,
+               ds.udp_senderr);
+        printf("    max_dispatch=%u max_caplen=%u read_timeout=%u\n",
+               ds.pcap_max_dispatched, ds.pcap_max_caplen,
+               ds.pcap_read_timeouts);
+    }
 	fp->ds.pcap_max_dispatched = 0;
 	fp->ds.pcap_max_caplen = 0;
 

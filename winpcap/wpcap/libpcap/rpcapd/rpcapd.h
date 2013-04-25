@@ -61,6 +61,7 @@ struct rpcapd_opt {
     char blocking_udp_socket;
     char single_threaded;
     char no_udp;
+    char print_stats;
 };
 
 extern struct rpcapd_opt rpcapd_opt;

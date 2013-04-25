@@ -122,6 +122,7 @@ void printusage()
 	"  -e -15,10    -- nice values of <pcap thread>,<send thread>\n"
 	"  -m <for multithreaded mode: ringbuf data buffer in MB>\n"
 	"  -k <for multithreaded mode: ringbuf npkts>\n"
+	"  -S: print out stats when the other host requests them\n"
     "  -h: print this help screen\n\n");
 }
 
@@ -170,7 +171,7 @@ int k;
 	rpcapd_opt.single_threaded = 1;
 
 	// Getting the proper command line options
-	while ((retval = getopt(argc, argv, "b:dhp:4l:na:s:f:vyz:u:gc:e:m:k:t:")) != -1)
+	while ((retval = getopt(argc, argv, "b:dhp:4l:na:s:f:vyz:u:gc:e:m:k:t:S")) != -1)
 	{
 		switch (retval)
 		{
@@ -288,6 +289,9 @@ int k;
                 if (rpcapd_opt.udp_mtu > 65000) {
                     rpcapd_opt.udp_mtu = 65000;
                 }
+                break;
+            case 'S':
+                rpcapd_opt.print_stats = 1;
                 break;
 			case 'h':
 				printusage();
