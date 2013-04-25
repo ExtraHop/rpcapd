@@ -1,11 +1,6 @@
 #!/bin/sh
 
-# curl -s 'http://<extrahop ip>/rpcapd/install-rpcapd.sh' | sh
-
-# or
-# curl http://<extrahop ip>/rpcapd/install-rpcapd.sh
-# chmod u+x install-rpcapd.sh
-# sh ./install-rpcapd.sh
+# curl 'http://<extrahop_ip>/rpcapd/install-rpcapd.sh' > install-rpcapd.sh && sudo sh ./install-rpcapd.sh <extrahop_ip> <rpcap_port_from_running_config>
 
 if [ "$#" -lt 2 ]; then
     echo "Usage: $0 <extrahop ip> <rpcap port>" >&2
