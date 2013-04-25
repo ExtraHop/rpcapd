@@ -1,0 +1,103 @@
+#!/bin/sh
+#
+# rpcapd Packet Forwarder Daemon
+#
+# chkconfig: - 20 80
+# description: rpcapd Packet Forwarder Daemon
+# processname: rpcapd
+# config: /etc/rpcapd.ini
+
+### BEGIN INIT INFO
+# Provides:          rpcapd
+# Required-Start:    $network $syslog
+# Required-Stop:     $syslog
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: rpcapd Packet Forwarder
+# Description:       Forwards Packets from libpcap to a remote host.
+### END INIT INFO
+
+# Source function library.
+. /etc/init.d/functions
+
+# Source networking configuration.
+. /etc/sysconfig/network
+
+exec=/usr/sbin/rpcapd
+prog=rpcapd
+conf=/etc/rpcapd.ini
+pidfile=/var/run/$prog.pid
+lockfile=/var/lock/subsys/$prog
+
+start() {
+	[ -x $exec ] || exit 5
+	echo -n $"Starting $prog: "
+	#daemon --pidfile $pidfile "$prog -v -f $conf 2>&1 | logger &"
+	nohup $prog -v -f $conf 2>&1 | logger -t $prog -i &
+	RETVAL=$?
+	echo
+	[ $RETVAL -eq 0 ] && touch $lockfile
+	return $RETVAL
+}
+
+stop() {
+	echo -n $"Stopping $prog: "
+	killproc $prog
+	RETVAL=$?
+	[ $RETVAL -eq 0 ] && rm -f $lockfile
+	echo
+	return $RETVAL
+}
+
+dostatus() {
+	status $prog
+}
+
+dostatus_q() {
+	status $prog >/dev/null 2>&1
+}
+
+restart() {
+	stop
+	start
+}
+
+reload() {
+	echo -n $"Reloading $prog: "
+	killproc $prog -HUP
+	RETVAL=$?
+	echo
+	return $RETVAL
+}
+
+# See how we were called.
+case "$1" in
+  start)
+	dostatus_q && exit 0
+	$1
+	;;
+  stop)
+	dostatus_q || exit 0
+	$1
+	;;
+  restart)
+	$1
+	;;
+  reload)
+	dostatus_q || exit 7
+	;;
+  force-reload)
+	restart
+	;;
+  condrestart|try-restart)
+	dostatus_q || exit 0
+	restart
+	;;
+  status)
+	dostatus
+	;;
+  *)
+	echo "Usage: $prog {start|stop|status|restart|condrestart|try-restart|reload|force-reload}"
+	exit 2
+esac
+exit $?
