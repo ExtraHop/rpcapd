@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# curl 'http://<extrahop_ip>/rpcapd/install-rpcapd.sh' > install-rpcapd.sh && sudo sh ./install-rpcapd.sh <extrahop_ip> <rpcap_port_from_running_config>
+# curl -k 'https://<extrahop_ip>/rpcapd/install-rpcapd.sh' > install-rpcapd.sh && sudo sh ./install-rpcapd.sh <extrahop_ip> <rpcap_port_from_running_config>
 
 if [ "$#" -lt 2 ]; then
     echo "Usage: $0 <extrahop ip> <rpcap port>" >&2
@@ -11,7 +11,7 @@ EH_IP="$1"
 RPCAP_PORT="$2"
 
 DRYRUN=
-RPCAPD_URI="http://$EH_IP/rpcapd"
+RPCAPD_URI="https://$EH_IP/rpcapd"
 RPCAPD_BIN_PATH="/usr/sbin/rpcapd"
 RPCAPD_INIT_PATH="/etc/init.d/rpcapd"
 RPCAPD_CFG_PATH="/etc/rpcapd.ini"
@@ -27,7 +27,7 @@ fetch() {
     if [ -n "$DRYRUN" ]; then
         OUT="/dev/null"
     fi
-    curl "$RPCAPD_URI/$1" > "$OUT"
+    curl -k "$RPCAPD_URI/$1" > "$OUT"
 }
 
 # stop rpcapd if there's already one on the system
