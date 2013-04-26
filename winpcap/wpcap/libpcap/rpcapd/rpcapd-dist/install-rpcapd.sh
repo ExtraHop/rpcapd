@@ -117,6 +117,7 @@ if [ -n "$fetch_only" ]; then
     RPCAPD_INIT_PATH="$fetch_dir/$rpcapd_init"
     RPCAPD_CFG_PATH="$fetch_dir/rpcapd.ini"
 elif [ -x "$RPCAPD_INIT_PATH" ]; then
+    echo "Stopping $RPCAPD_INIT_PATH"
     $RPCAPD_INIT_PATH stop
 fi
 if [ -z "$cfg_update_only" ]; then
@@ -161,7 +162,9 @@ chmod 644 "$RPCAPD_CFG_PATH"
 set -e
 
 if [ -z "$fetch_only" -a -x "$RPCAPD_INIT_PATH" ]; then
+    echo "Adding $RPCAPD_INIT_PATH to startup via $init_add_cmd"
     $init_add_cmd
+    echo "Starting $RPCAPD_INIT_PATH"
     $RPCAPD_INIT_PATH start
 fi
 
