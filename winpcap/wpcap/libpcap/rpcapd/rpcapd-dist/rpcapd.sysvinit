@@ -23,38 +23,39 @@
 # Source networking configuration.
 . /etc/sysconfig/network
 
-exec=/usr/sbin/rpcapd
-prog=rpcapd
-conf=/etc/rpcapd.ini
-pidfile=/var/run/$prog.pid
-lockfile=/var/lock/subsys/$prog
+NAME=rpcapd
+CONF=/etc/rpcapd.ini
+DAEMON=/usr/sbin/$NAME
+DAEMON_ARGS="-v -f $CONF"
+PIDFILE=/var/run/$NAME.pid
+# lockfile=/var/lock/subsys/$NAME
 
 start() {
-	[ -x $exec ] || exit 5
-	echo -n $"Starting $prog: "
-	#daemon --pidfile $pidfile "$prog -v -f $conf 2>&1 | logger &"
-	nohup $prog -v -f $conf 2>&1 | logger -t $prog -i &
+	[ -x $DAEMON ] || exit 5
+	echo -n $"Starting $NAME: "
+	#daemon --PIDFILE $PIDFILE "$DAEMON $DAEMON_ARGS 2>&1 | logger &"
+	nohup $DAEMON $DAEMON_ARGS 2>&1 | logger -t $NAME -i &
 	RETVAL=$?
 	echo
-	[ $RETVAL -eq 0 ] && touch $lockfile
+	# [ $RETVAL -eq 0 ] && touch $lockfile
 	return $RETVAL
 }
 
 stop() {
-	echo -n $"Stopping $prog: "
-	killproc $prog
+	echo -n $"Stopping $NAME: "
+	killproc $NAME
 	RETVAL=$?
-	[ $RETVAL -eq 0 ] && rm -f $lockfile
+	# [ $RETVAL -eq 0 ] && rm -f $lockfile
 	echo
 	return $RETVAL
 }
 
 dostatus() {
-	status $prog
+	status $NAME
 }
 
 dostatus_q() {
-	status $prog >/dev/null 2>&1
+	status $NAME >/dev/null 2>&1
 }
 
 restart() {
@@ -63,8 +64,8 @@ restart() {
 }
 
 reload() {
-	echo -n $"Reloading $prog: "
-	killproc $prog -HUP
+	echo -n $"Reloading $NAME: "
+	killproc $NAME -HUP
 	RETVAL=$?
 	echo
 	return $RETVAL
@@ -97,7 +98,7 @@ case "$1" in
 	dostatus
 	;;
   *)
-	echo "Usage: $prog {start|stop|status|restart|condrestart|try-restart|reload|force-reload}"
+	echo "Usage: $NAME {start|stop|status|restart|condrestart|try-restart|reload|force-reload}"
 	exit 2
 esac
 exit $?
