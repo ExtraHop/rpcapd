@@ -124,27 +124,27 @@ if [ -z "$cfg_update_only" ]; then
     if [ -n "$no_fetch" ]; then
         ensure_exists "$fetch_dir/$rpcapd_bin"
         ensure_exists "$fetch_dir/$rpcapd_init"
-        set +e
+        set -e
         cp -f "$fetch_dir/$rpcapd_bin" "$RPCAPD_BIN_PATH"
         cp -f "$fetch_dir/$rpcapd_init" "$RPCAPD_INIT_PATH"
-        set -e
+        set +e
     else
         fetch "$rpcapd_bin" "$RPCAPD_BIN_PATH"
         fetch "$rpcapd_init" "$RPCAPD_INIT_PATH"
     fi
-    set +e
+    set -e
     chmod u+x "$RPCAPD_BIN_PATH"
     chmod u+x "$RPCAPD_INIT_PATH"
-    set -e
+    set +e
 fi
 
 if [ -n "$rpcapd_extra_args" ]; then
     # update DAEMON_ARGS="..." in the init file
     echo "Adding extra DAEMON_ARGS=\"... $rpcapd_extra_args\""
-    set +e
+    set -e
     sed -i "s|^\(DAEMON_ARGS=\".*\)\"$|\1 $rpcapd_extra_args\"|" \
            "$RPCAPD_INIT_PATH"
-    set -e
+    set +e
 fi
 
 cfg=$(cat <<EOF
@@ -156,10 +156,10 @@ EOF
 echo "Writing config to $RPCAPD_CFG_PATH with contents:"
 echo "$cfg"
 
-set +e
+set -e
 echo "$cfg" > "$RPCAPD_CFG_PATH"
 chmod 644 "$RPCAPD_CFG_PATH"
-set -e
+set +e
 
 if [ -z "$fetch_only" -a -x "$RPCAPD_INIT_PATH" ]; then
     echo "Adding $RPCAPD_INIT_PATH to startup via $init_add_cmd"
