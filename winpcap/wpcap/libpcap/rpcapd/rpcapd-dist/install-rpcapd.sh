@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# curl --fail -k 'https://<extrahop_ip>/rpcapd/install-rpcapd.sh' > install-rpcapd.sh && sudo sh ./install-rpcapd.sh <extrahop_ip> <rpcap_port_from_running_config>
+# curl --fail -k 'https://<extrahop_ip>/tools/rpcapd/install-rpcapd.sh' > install-rpcapd.sh && sudo sh ./install-rpcapd.sh <extrahop_ip> <rpcap_port_from_running_config>
 
 RPCAPD_BIN_PATH="/usr/sbin/rpcapd"
 RPCAPD_INIT_PATH="/etc/init.d/rpcapd"
@@ -21,8 +21,8 @@ To only fetch files into the current directory but not install them:
 
 
 Options:
-  -u 'https://foobar/rpcapd/': fetch files from https://foobar/rpcapd/ instead
-                               of https://<extrahop_ip>/rpcapd/.
+  -u 'https://foobar/tools/rpcapd/': fetch files from the given uri instead
+                                     of https://<extrahop_ip>/tools/rpcapd/.
   -i <directory>: Use install files from directory, instead of fetching
                   from <extrahop_ip>.
   -o <directory>: Only output fetched files to <directory>, and don't install.
@@ -110,7 +110,7 @@ ensure_exists() {
     fi
 }
 
-[ -z "$fetch_uri" ] && fetch_uri="https://$eh_ip/rpcapd"
+[ -z "$fetch_uri" ] && fetch_uri="https://$eh_ip/tools/rpcapd"
 
 if [ -n "$fetch_only" ]; then
     RPCAPD_BIN_PATH="$fetch_dir/$rpcapd_bin"
