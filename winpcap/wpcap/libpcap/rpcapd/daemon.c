@@ -157,10 +157,12 @@ pcap_t *pcap_open_live_ex(const char *source, int buffer_size, int snaplen, int 
     p = pcap_create(source, errbuf);
     if (p == NULL)
         return (NULL);
-    printf("pcap_set_buffer_size(%d)\n", buffer_size);
-    status = pcap_set_buffer_size(p, buffer_size);
-    if (status < 0) {
-        printf("pcap_set_buffer_size(%d) failed\n", buffer_size);
+    if (buffer_size > 0) {
+        printf("pcap_set_buffer_size(%d)\n", buffer_size);
+        status = pcap_set_buffer_size(p, buffer_size);
+        if (status < 0) {
+            printf("pcap_set_buffer_size(%d) failed\n", buffer_size);
+        }
     }
     status = pcap_set_snaplen(p, snaplen);
     if (status < 0)

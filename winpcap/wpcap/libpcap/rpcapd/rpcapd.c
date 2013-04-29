@@ -65,7 +65,16 @@ int passivemode= 1;						//!< '1' if we want to run in passive mode as well
 struct addrinfo mainhints;				//!< temporary struct to keep settings needed to open the new socket
 char address[MAX_LINE + 1];				//!< keeps the network address (either numeric or literal) to bind to
 char port[MAX_LINE + 1];				//!< keeps the network port to bind to
-struct rpcapd_opt rpcapd_opt;
+struct rpcapd_opt rpcapd_opt = {
+    .udp_mtu = 1472,
+    .pcap_buffer_size = 16777216,
+    .udp_sndbuf_size = 8388608,
+    .cpu_affinity_pcap = -1,
+    .cpu_affinity_udp = -1,
+    .nice_pcap = 1000,
+    .nice_udp = 1000,
+    .single_threaded = 1,
+};
 
 extern char *optarg;	// for getopt()
 
@@ -160,15 +169,6 @@ int k;
 	mainhints.ai_family = PF_UNSPEC;
 	mainhints.ai_flags = AI_PASSIVE;	// Ready to a bind() socket
 	mainhints.ai_socktype = SOCK_STREAM;
-
-	rpcapd_opt.udp_mtu = 1472;
-	rpcapd_opt.pcap_buffer_size = 16777216;
-	rpcapd_opt.udp_sndbuf_size = 8388608;
-	rpcapd_opt.cpu_affinity_pcap = -1;
-	rpcapd_opt.cpu_affinity_udp = -1;
-	rpcapd_opt.nice_pcap = 1000;
-	rpcapd_opt.nice_udp = 1000;
-	rpcapd_opt.single_threaded = 1;
 
 	// Getting the proper command line options
 	while ((retval = getopt(argc, argv, "b:dhp:4l:na:s:f:vyz:u:gc:e:m:k:t:S")) != -1)
