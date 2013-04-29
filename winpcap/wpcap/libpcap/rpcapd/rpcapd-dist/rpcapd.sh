@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# curl --fail -k 'https://<extrahop_ip>/tools/rpcapd/install-rpcapd.sh' > install-rpcapd.sh && sudo sh ./install-rpcapd.sh <extrahop_ip> <rpcap_port_from_running_config>
+# curl --connect-timeout 3 --fail -k 'https://<extrahop_ip>/tools/rpcapd/rpcapd.sh' > install-rpcapd.sh && sudo sh ./install-rpcapd.sh <extrahop_ip> <rpcap_port_from_running_config>
 
 RPCAPD_BIN_PATH="/opt/extrahop/sbin/rpcapd"
 RPCAPD_INIT_PATH="/etc/init.d/rpcapd"
@@ -97,7 +97,7 @@ fetch() {
     uri="$fetch_uri/$1"
     out="$2"
     echo "Fetching $uri > $out"
-    if ! curl --fail -k "$uri" > "$out"; then
+    if ! curl --connect-timeout 3 --fail -k "$uri" > "$out"; then
         echo "Error: Fetching $uri > $out failed!"
         exit 1
     fi
