@@ -17,9 +17,6 @@ SUBDIRS = \
 
 .PHONY: all
 all: $(SUBDIRS)
-	tar -cvf - -C $(RPCAPD_DIST_DIR) $(RPCAPD_FILES) \
-	| cat extract.sh - > $(INSTALLER_TARGET)
-	chmod 0755 $(INSTALLER_TARGET)
 
 .PHONY: clean
 clean: $(SUBDIRS)
@@ -27,6 +24,9 @@ clean: $(SUBDIRS)
 
 .PHONY: install
 install: $(SUBDIRS)
+	tar -cvf - -C $(RPCAPD_DIST_DIR) $(RPCAPD_FILES) \
+	| cat extract.sh - > $(INSTALLER_TARGET)
+	chmod 0755 $(INSTALLER_TARGET)
 	$(INSTALL) -d install/www
 	$(INSTALL) -d install/www/tools
 	$(INSTALL) -m 0755 $(INSTALLER_TARGET) install/www/tools
