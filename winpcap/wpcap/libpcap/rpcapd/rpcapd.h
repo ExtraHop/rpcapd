@@ -62,6 +62,7 @@ struct rpcapd_opt {
     char single_threaded;
     char no_udp;
     char print_stats;
+    char use_syslog;
 };
 
 extern struct rpcapd_opt rpcapd_opt;

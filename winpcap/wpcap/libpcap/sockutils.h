@@ -124,7 +124,12 @@ int WSAAPI getnameinfo(const struct sockaddr*,socklen_t,char*,DWORD,
 
 
 
+#define __FORMAT(archetype, str_idx, args_idx) \
+    __attribute__((format(archetype, str_idx, args_idx)))
 
+extern void log_warn(const char *fmt, ...) __FORMAT(printf, 1, 2);
+
+extern void log_info(const char *fmt, ...) __FORMAT(printf, 1, 2);
 
 /*!
 	\brief DEBUG facility: it prints an error message on the screen (stderr)
@@ -152,7 +157,7 @@ int WSAAPI getnameinfo(const struct sockaddr*,socklen_t,char*,DWORD,
 		// Remember to activate the 'allow service to interact with desktop' flag of the service
 		#define SOCK_ASSERT(msg, expr) { _CrtDbgReport(_CRT_WARN, NULL, 0, NULL, "%s\n", msg); fprintf(stderr, "%s\n", msg); assert(expr); }
 	#else
-		#define SOCK_ASSERT(msg, expr) { fprintf(stderr, "%s\n", msg); assert(expr); }
+		#define SOCK_ASSERT(msg, expr) { log_warn("%s", msg); assert(expr); }
 	#endif
 #endif
 

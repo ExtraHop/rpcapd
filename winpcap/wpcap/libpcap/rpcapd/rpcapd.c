@@ -37,6 +37,7 @@
 #include <errno.h>		// for the errno variable
 #include <string.h>		// for strtok, etc
 #include <stdlib.h>		// for malloc(), free(), ...
+#include <stdarg.h>
 #include <pcap.h>		// for PCAP_ERRBUF_SIZE
 #include <signal.h>		// for signal()
 #include <pthread.h>
@@ -50,6 +51,9 @@
 #ifndef WIN32
 #include <unistd.h>		// for exit()
 #include <sys/wait.h>	// waitpid()
+
+#include <syslog.h>
+
 #else
 #include "win32-svc.h"	// for Win32 service stuff
 #endif
@@ -88,6 +92,53 @@ void main_active(void *ptr);
 #ifndef WIN32
 void main_cleanup_childs(int sign);
 #endif
+
+int
+rpcapd_log_init(const char *argv0, int also_stderr)
+{
+#ifndef WIN32
+    int flags = LOG_CONS | LOG_PID;
+    if (also_stderr) {
+        flags |= LOG_PERROR;
+    }
+    setlogmask(LOG_UPTO(LOG_NOTICE));
+    openlog("rpcapd", flags, LOG_DAEMON);
+#endif
+}
+
+void
+log_warn(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    if (rpcapd_opt.use_syslog) {
+#ifndef WIN32
+        vsyslog(LOG_MAKEPRI(LOG_DAEMON, LOG_WARNING), fmt, ap);
+#endif
+    }
+    else {
+        vfprintf(stderr, fmt, ap);
+        fprintf(stderr, "\n");
+    }
+    va_end(ap);
+}
+
+void
+log_info(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    if (rpcapd_opt.use_syslog) {
+#ifndef WIN32
+        vsyslog(LOG_MAKEPRI(LOG_DAEMON, LOG_WARNING), fmt, ap);
+#endif
+    }
+    else {
+        vfprintf(stderr, fmt, ap);
+        fprintf(stderr, "\n");
+    }
+    va_end(ap);
+}
 
 
 /*!
@@ -132,6 +183,7 @@ void printusage()
 	"  -m <for multithreaded mode: ringbuf data buffer in MB>\n"
 	"  -k <for multithreaded mode: ringbuf npkts>\n"
 	"  -S: print out stats when the other host requests them\n"
+	"  -L: Use syslog in addition to stderr\n"
     "  -h: print this help screen\n\n");
 }
 
@@ -171,7 +223,7 @@ int k;
 	mainhints.ai_socktype = SOCK_STREAM;
 
 	// Getting the proper command line options
-	while ((retval = getopt(argc, argv, "b:dhp:4l:na:s:f:vyz:u:gc:e:m:k:t:S")) != -1)
+	while ((retval = getopt(argc, argv, "b:dhp:4l:na:s:f:vyz:u:gc:e:m:k:t:SL")) != -1)
 	{
 		switch (retval)
 		{
@@ -237,13 +289,13 @@ int k;
 			case 'm':
 			    rpcapd_opt.ringbuf_max_pkt_data = atoi(optarg) * 1000 * 1000;
 				if (rpcapd_opt.ringbuf_max_pkt_data <= 0) {
-					printf("ignoring invalid ringbuf memory size\n");
+					log_warn("ignoring invalid ringbuf memory size");
 				}
 			    break;
 			case 'k':
 			    k = atoi(optarg);
 			    if (k <= 0) {
-			        printf("ignoring invalid ringbuf pkt count\n");
+			        log_warn("ignoring invalid ringbuf pkt count");
 			        break;
 			    }
 			    rpcapd_opt.ringbuf_max_pkts = 1;
@@ -253,7 +305,7 @@ int k;
 			    break;
             case 'y':
                 rpcapd_opt.no_udp = 1;
-                printf("DRY RUN - NO UDP WILL BE SENT\n");
+                log_warn("DRY RUN - NO UDP WILL BE SENT");
                 break;
             case 'z':
                 rpcapd_opt.pcap_buffer_size = atoi(optarg);
@@ -261,7 +313,7 @@ int k;
 			case 'u':
 			    rpcapd_opt.udp_sndbuf_size = atoi(optarg);
 			    if (rpcapd_opt.udp_sndbuf_size <= 0) {
-					printf("ignoring invalid udp sndbuf size\n");
+					log_warn("ignoring invalid udp sndbuf size");
 			    }
 			    break;
             case 'g':
@@ -293,12 +345,19 @@ int k;
             case 'S':
                 rpcapd_opt.print_stats = 1;
                 break;
+            case 'L':
+                rpcapd_opt.use_syslog = 1;
+                break;
 			case 'h':
 				printusage();
 				exit(0);
 			default:
 				break;
 		}
+	}
+
+	if (rpcapd_opt.use_syslog) {
+	    rpcapd_log_init(argv[0], !isdaemon);
 	}
 
 	if (savefile[0])

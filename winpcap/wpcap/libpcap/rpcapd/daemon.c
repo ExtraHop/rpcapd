@@ -47,6 +47,7 @@
 #include <sys/types.h>
 #include <sys/uio.h>
 #include <pwd.h>		// for password management
+#include <syslog.h>
 
 int
 set_non_blocking(int fd)
@@ -70,8 +71,8 @@ set_non_blocking(int fd)
 int
 set_non_blocking(int fd)
 {
-    printf("WARNING: %s(fd=%d) not implemented on this platform\n",
-           __func__, fd);
+    log_warn("WARNING: %s(fd=%d) not implemented on this platform",
+             __func__, fd);
 }
 
 #define ex_iovec    WSABUF
@@ -158,10 +159,10 @@ pcap_t *pcap_open_live_ex(const char *source, int buffer_size, int snaplen, int 
     if (p == NULL)
         return (NULL);
     if (buffer_size > 0) {
-        printf("pcap_set_buffer_size(%d)\n", buffer_size);
+        log_info("pcap_set_buffer_size(%d)", buffer_size);
         status = pcap_set_buffer_size(p, buffer_size);
         if (status < 0) {
-            printf("pcap_set_buffer_size(%d) failed\n", buffer_size);
+            log_warn("pcap_set_buffer_size(%d) failed", buffer_size);
         }
     }
     status = pcap_set_snaplen(p, snaplen);
@@ -1080,7 +1081,7 @@ struct rpcap_openreply *openreply;	// open reply message
 	// Puts a '0' to terminate the source string
 	source[strlen(PCAP_SRC_IF_STRING) + plen]= 0;
 
-	printf("Opening '%s'\n", source);
+	log_info("Opening '%s'", source);
 
 	// Open the selected device
 	// This is a fake open, since we do that only to get the needed parameters, then we close the device again
@@ -1225,7 +1226,7 @@ int serveropen_dp;							// keeps who is going to open the data connection
 			sock_geterror("getnameinfo(): ", errbuf, PCAP_ERRBUF_SIZE);
 			goto error;
 		}
-		printf("Connecting to udp %s:%s\n", peerhost, portdata);
+		log_info("Connecting UDP packet data socket to %s:%s", peerhost, portdata);
 
 		if (sock_initaddress(peerhost, portdata, &hints, &addrinfo, errbuf, PCAP_ERRBUF_SIZE) == -1)
 			goto error;
@@ -1326,7 +1327,6 @@ int serveropen_dp;							// keeps who is going to open the data connection
 	pthread_attr_setdetachstate(&detachedAttribute, PTHREAD_CREATE_DETACHED);
 	
 	// Now we have to create a new thread to receive packets
-	printf("Starting pcap_dispatch thread\n");
 	if ( pthread_create(threaddata, &detachedAttribute, (void *) daemon_thrdatamain, (void *) fp) )
 	{
 		snprintf(errbuf, PCAP_ERRBUF_SIZE, "Error creating the data thread");
@@ -1580,8 +1580,8 @@ struct rpcap_stats *netstats;		// statistics sent on the network
 	struct daemon_ctx_stats ds = fp->ds;
 
     if (rpcapd_opt.print_stats) {
-        printf("ifrecv=%u (%u)\t" "TotCapt=%u (%u)\t"
-               "krnldrop=%u %u%% (%u %u%%)\t" "ifdrop=%u (%u)\n",
+        log_info("ifrecv=%u (%u) TotCapt=%u (%u) "
+               "krnldrop=%u %u%% (%u %u%%) ifdrop=%u (%u)",
                (stats.ps_recv - fp->prev_ps.ps_recv), stats.ps_recv,
                (ds.pcap_dispatched - fp->prev_ds.pcap_dispatched),
                        ds.pcap_dispatched,
@@ -1594,21 +1594,21 @@ struct rpcap_stats *netstats;		// statistics sent on the network
                        (stats.ps_drop * 100) / stats.ps_recv,
                (stats.ps_ifdrop - fp->prev_ps.ps_ifdrop), stats.ps_ifdrop);
         if (!rpcapd_opt.single_threaded) {
-            printf("    sendring_full=%u (%u sleep)\t"
-                   "sendring_buf_full=%u (%u sleep)\t"
-                   "sendthr empty sleep=%u\n",
+            log_info("    sendring_full=%u (%u sleep) "
+                   "sendring_buf_full=%u (%u sleep) "
+                   "sendthr empty sleep=%u",
                    ds.sendring_full, ds.sendring_full_sleep,
                    ds.sendring_buf_full, ds.sendring_buf_full_sleep,
                    ds.sendring_empty_sleep);
         }
-        printf("sent=%u (%u)\t" "sentbytes=%u (%u)\t" "eagain=%u (%u sleep)\t"
-               "enobufs=%u (%u sleep)\t" "senderr=%u\n",
+        log_info("sent=%u (%u) sentbytes=%u (%u) eagain=%u (%u sleep) "
+               "enobufs=%u (%u sleep) senderr=%u",
                (ds.udp_pkts - fp->prev_ds.udp_pkts), ds.udp_pkts,
                (ds.udp_bytes - fp->prev_ds.udp_bytes), ds.udp_bytes,
                ds.udp_eagain, ds.udp_eagain_sleep,
                ds.udp_enobufs, ds.udp_enobufs_sleep,
                ds.udp_senderr);
-        printf("    max_dispatch=%u max_caplen=%u read_timeout=%u\n",
+        log_info("    max_dispatch=%u max_caplen=%u read_timeout=%u",
                ds.pcap_max_dispatched, ds.pcap_max_caplen,
                ds.pcap_read_timeouts);
     }
@@ -1701,8 +1701,8 @@ ex_assert(const char *file, int line, const char *func, const char *strx)
     ctime_r(&t, tstr);
 #endif
     tstr[24] = '\0';
-    fprintf(stderr, "%s: %s:%d:%s: Assertion '%s' failed\n",
-            tstr, file, line, func, strx);
+    log_warn("%s: %s:%d:%s: Assertion '%s' failed",
+             tstr, file, line, func, strx);
     fflush(stderr);
     abort();
 }
@@ -1753,21 +1753,21 @@ daemon_set_cpu(int cpu)
 
     CPU_ZERO(&csmask);
     CPU_SET(cpu, &csmask);
-    printf("attempting sched_setaffinity(%d), cur cpu=%d\n",
-           cpu, sched_getcpu());
+    log_info("attempting sched_setaffinity(%d), cur cpu=%d",
+             cpu, sched_getcpu());
     if (sched_setaffinity(rtid, sizeof(cpu_set_t), &csmask) != 0) {
-        perror("WARNING: sched_setaffinity() failed");
+        log_warn("WARNING: sched_setaffinity() failed: %s", strerror(errno));
     }
-    printf("    now cpu=%d\n", sched_getcpu());
+    log_info("    now cpu=%d", sched_getcpu());
 }
 
 void
 daemon_set_nice(int nice)
 {
     int rtid = gettid();
-    printf("attempting setpriority(%d)\n", nice);
+    log_info("attempting setpriority(%d)", nice);
     if (setpriority(PRIO_PROCESS, rtid, nice) != 0) {
-        perror("WARNING: setpriority() failed");
+        log_warn("WARNING: setpriority() failed: %s", strerror(errno));
     }
 }
 
@@ -1776,15 +1776,15 @@ daemon_set_nice(int nice)
 void
 daemon_set_cpu(int cpu)
 {
-    printf("WARNING: %s(cpu=%d) not implemented on this platform\n",
-           __func__, cpu);
+    log_warn("WARNING: %s(cpu=%d) not implemented on this platform",
+             __func__, cpu);
 }
 
 void
 daemon_set_nice(int nice)
 {
-    printf("WARNING: %s(nice=%d) not implemented on this platform\n",
-           __func__, nice);
+    log_warn("WARNING: %s(nice=%d) not implemented on this platform",
+             __func__, nice);
 }
 
 #endif
@@ -1809,25 +1809,27 @@ daemon_set_sndbuf_size(struct daemon_ctx *fp)
     if (rpcapd_opt.udp_sndbuf_size < 16384) {
         rpcapd_opt.udp_sndbuf_size = 8388608;
     }
-    printf("setting udp pkt sndbuf to %d bytes\n",
-           rpcapd_opt.udp_sndbuf_size);
+    log_info("setting udp pkt sndbuf to %d bytes",
+             rpcapd_opt.udp_sndbuf_size);
 #ifdef SO_SNDBUFFORCE
 #define DAEMON_SO_SNDBUF    SO_SNDBUFFORCE
 #else
 #define DAEMON_SO_SNDBUF    SO_SNDBUF
-    printf("SO_SNDBUFFORCE does not exist on this kernel, adjust manually:\n");
-    printf("  $ sudo -i\n");
-    printf("  $ echo 8388608 > /proc/sys/net/core/wmem_max\n");
+    log_warn("SO_SNDBUFFORCE does not exist on this kernel, adjust manually:");
+    log_warn("  $ sudo -i");
+    log_warn("  $ echo 8388608 > /proc/sys/net/core/wmem_max");
 #endif
     if (setsockopt(fp->rmt_sockdata, SOL_SOCKET, DAEMON_SO_SNDBUF,
                    (char *)&rpcapd_opt.udp_sndbuf_size, sizeof(int)) < 0) {
-        perror("WARNING: setsockopt(SO_SNDBUF) failed");
+        log_warn("WARNING: setsockopt(SO_SNDBUF) failed: %s",
+                 strerror(errno));
     }
     if (getsockopt(fp->rmt_sockdata, SOL_SOCKET, SO_SNDBUF,
                    (char *)&sndbuf, &sndbuf_len) < 0) {
-        perror("WARNING: getsockopt(SO_SNDBUF) failed");
+        log_warn("WARNING: getsockopt(SO_SNDBUF) failed: %s",
+                 strerror(errno));
     }
-    printf("    udp pkt sndbuf is set to %d bytes\n", sndbuf);
+    log_info("    udp pkt sndbuf is set to %d bytes", sndbuf);
 }
 
 void
@@ -1836,18 +1838,20 @@ daemon_set_ip_recverr(struct daemon_ctx *fp)
 #ifdef IP_RECVERR
     int one = 1;
     socklen_t one_len = sizeof(int);
-    printf("setting IP_RECVERR to 1\n");
+    log_info("setting IP_RECVERR to 1");
     if (setsockopt(fp->rmt_sockdata, SOL_IP, IP_RECVERR,
                    &one, sizeof(int)) < 0) {
-        perror("WARNING: setsockopt(IP_RECVERR) failed");
+        log_warn("WARNING: setsockopt(IP_RECVERR) failed: %s",
+                 strerror(errno));
     }
     if (getsockopt(fp->rmt_sockdata, SOL_IP, IP_RECVERR,
                    &one, &one_len) < 0) {
-        perror("WARNING: getsockopt(IP_RECVERR) failed");
+        log_warn("WARNING: getsockopt(IP_RECVERR) failed: %s",
+                 strerror(errno));
     }
-    printf("    IP_RECVERR is set to %d\n", one);
+    log_info("    IP_RECVERR is set to %d", one);
 #else
-    printf("WARNING: current platform doesn't support IP_RECVERR\n");
+    log_warn("WARNING: current platform doesn't support IP_RECVERR");
 #endif
 }
 
@@ -1887,7 +1891,7 @@ daemon_send_udp(struct daemon_ctx *fp, const char *buf, unsigned int len)
         else {
             snprintf(fp->errbuf, PCAP_ERRBUF_SIZE,
                      "send(udp_fd) failed: %s", strerror(errno));
-            perror("ERROR: send(udp_fd) failed");
+            log_warn("ERROR: %s", fp->errbuf);
             fp->ds.udp_senderr++;
             fp->cb_rc = -1;
         }
@@ -1936,13 +1940,13 @@ daemon_sendv_udp(struct daemon_ctx *fp, ex_iovec *iov,
             }
         }
         else if (wlen >= 0) {
-            printf("WARNING: sendv(udp_fd) returned %zd, expected %u\n",
-                   wlen, iov_len);
+            log_warn("WARNING: sendv(udp_fd) returned %zd, expected %u",
+                     wlen, iov_len);
         }
         else {
             snprintf(fp->errbuf, PCAP_ERRBUF_SIZE,
                      "send(udp_fd) failed: %s", strerror(errno));
-            perror("ERROR: send(udp_fd) failed");
+            log_warn("ERROR: %s", fp->errbuf);
             fp->ds.udp_senderr++;
             fp->cb_rc = -1;
         }
@@ -2266,7 +2270,7 @@ daemon_ringbuf_init(struct daemon_ctx *fp, char *errbuf)
     if (rpcapd_opt.ringbuf_max_pkt_data < 10000) {
         rpcapd_opt.ringbuf_max_pkt_data = 64000000;
     }
-    printf("ringbuf_max_pkt_data=%d bytes\n", rpcapd_opt.ringbuf_max_pkt_data);
+    log_info("ringbuf_max_pkt_data=%d bytes", rpcapd_opt.ringbuf_max_pkt_data);
     daemon_ringbuf_len = rpcapd_opt.ringbuf_max_pkt_data;
     daemon_ringbuf = malloc(daemon_ringbuf_len);
     if (daemon_ringbuf == NULL) {
@@ -2281,7 +2285,7 @@ daemon_ringbuf_init(struct daemon_ctx *fp, char *errbuf)
         rpcapd_opt.ringbuf_max_pkts = 65536;
     }
     daemon_ring_ctx.tail_signal = rpcapd_opt.ringbuf_max_pkts / 2;
-    printf("ringbuf_max_pkts=%d pkts\n", rpcapd_opt.ringbuf_max_pkts);
+    log_info("ringbuf_max_pkts=%d pkts", rpcapd_opt.ringbuf_max_pkts);
     daemon_ring = calloc(rpcapd_opt.ringbuf_max_pkts,
                          sizeof(struct daemon_pkt_entry));
     if (daemon_ring == NULL) {
@@ -2292,7 +2296,6 @@ daemon_ringbuf_init(struct daemon_ctx *fp, char *errbuf)
         goto error;
     }
     daemon_ring_mask = rpcapd_opt.ringbuf_max_pkts - 1;
-    printf("ring_mask=0x%x\n", daemon_ring_mask);
 
     return 0;
 
@@ -2418,12 +2421,13 @@ pcap_handler dispatch_cb = daemon_dispatch_cb_threaded;
 	daemon_set_ip_recverr(fp);
 
 	if (rpcapd_opt.blocking_udp_socket) {
-	    printf("udp pkt socket blocking\n");
+	    log_info("udp pkt socket blocking");
 	}
 	else {
-	    printf("udp pkt socket non-blocking\n");
+	    log_info("udp pkt socket non-blocking");
         if (set_non_blocking(fp->rmt_sockdata) < 0) {
-            perror("WARNING: set_non_blocking(udp sock) failed");
+            log_warn("WARNING: set_non_blocking(udp sock) failed: %s",
+                     strerror(errno));
         }
 	}
 
@@ -2431,15 +2435,15 @@ pcap_handler dispatch_cb = daemon_dispatch_cb_threaded;
 	                        rpcapd_opt.nice_pcap);
 
 	if (rpcapd_opt.udp_mtu > 0) {
-	    printf("udp mtu %u\n", rpcapd_opt.udp_mtu);
+	    log_info("udp mtu %u", rpcapd_opt.udp_mtu);
 	}
 
 	if (rpcapd_opt.single_threaded) {
-	    printf("Starting in single-threaded mode\n");
+	    log_info("Starting in single-threaded mode");
 	    dispatch_cb = daemon_dispatch_cb_single_thr;
 	}
 	else {
-        printf("Starting packet sending thread\n");
+        log_info("Starting packet sending thread");
         if (pthread_create(&sendthread, NULL, (void *)daemon_sendthread_start,
                             (void *)fp) != 0) {
             snprintf(errbuf, PCAP_ERRBUF_SIZE,
@@ -2483,7 +2487,6 @@ pcap_handler dispatch_cb = daemon_dispatch_cb_threaded;
 error:
 
 	SOCK_ASSERT(errbuf, 1);
-	printf("ERROR: %s\n", errbuf);
  	closesocket(fp->rmt_sockdata);
 	fp->rmt_sockdata= 0;
 
@@ -2499,7 +2502,7 @@ error:
     daemon_ringbuf = NULL;
     free(daemon_ring);
     daemon_ring = NULL;
-	printf("Packet sending thread exiting\n");
+	log_warn("Packet sending thread exiting");
 	return NULL;
 }
 
