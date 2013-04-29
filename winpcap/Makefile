@@ -30,6 +30,8 @@ install: $(SUBDIRS)
 	$(INSTALL) -d install/www
 	$(INSTALL) -d install/www/tools
 	$(INSTALL) -m 0755 $(INSTALLER_TARGET) install/www/tools
+	$(INSTALL) -d install/www/tools/rpcapd
+	sh $(INSTALLER_TARGET) --extract install/www/tools/rpcapd
 	tar -C install -cvzf $(PACKAGES)/$(PKG) .
 
 .PHONY: distclean
