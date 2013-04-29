@@ -134,8 +134,8 @@ if [ -z "$cfg_update_only" ]; then
         fetch "$rpcapd_init" "$RPCAPD_INIT_PATH"
     fi
     set -e
-    chmod u+x "$RPCAPD_BIN_PATH"
-    chmod u+x "$RPCAPD_INIT_PATH"
+    chmod a+x "$RPCAPD_BIN_PATH"
+    chmod a+x "$RPCAPD_INIT_PATH"
     set +e
 fi
 
