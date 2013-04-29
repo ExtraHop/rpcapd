@@ -33,7 +33,7 @@ PIDFILE=/var/run/$NAME.pid
 start() {
 	[ -x $DAEMON ] || exit 5
 	echo -n $"Starting $NAME: "
-	daemon --PIDFILE $PIDFILE "$DAEMON $DAEMON_ARGS"
+	daemon --pidfile "$PIDFILE" "$DAEMON $DAEMON_ARGS"
 	RETVAL=$?
 	echo
 	# [ $RETVAL -eq 0 ] && touch $lockfile
