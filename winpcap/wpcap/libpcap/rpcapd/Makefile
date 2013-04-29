@@ -49,7 +49,7 @@ else ifeq ($(PLATFORM), linux)
 else
 default:
 	$(MAKE) PLATFORM=linux
-	#$(MAKE) PLATFORM=windows
+	$(MAKE) PLATFORM=windows
 endif
 
 
