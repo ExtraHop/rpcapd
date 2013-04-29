@@ -26,15 +26,14 @@
 NAME=rpcapd
 CONF=/etc/rpcapd.ini
 DAEMON=/usr/sbin/$NAME
-DAEMON_ARGS="-v -f $CONF"
+DAEMON_ARGS="-v -d -L -f $CONF"
 PIDFILE=/var/run/$NAME.pid
 # lockfile=/var/lock/subsys/$NAME
 
 start() {
 	[ -x $DAEMON ] || exit 5
 	echo -n $"Starting $NAME: "
-	#daemon --PIDFILE $PIDFILE "$DAEMON $DAEMON_ARGS 2>&1 | logger &"
-	nohup $DAEMON $DAEMON_ARGS 2>&1 | logger -t $NAME -i &
+	daemon --PIDFILE $PIDFILE "$DAEMON $DAEMON_ARGS"
 	RETVAL=$?
 	echo
 	# [ $RETVAL -eq 0 ] && touch $lockfile

@@ -16,7 +16,7 @@ PATH=/sbin:/usr/sbin:/bin:/usr/bin
 DESC="rpcapd Packet Forwarder"
 NAME=rpcapd
 DAEMON=/usr/sbin/$NAME
-DAEMON_ARGS="-v -d -f /etc/rpcapd.ini"
+DAEMON_ARGS="-v -d -L -f /etc/rpcapd.ini"
 PIDFILE=/var/run/$NAME.pid
 SCRIPTNAME=/etc/init.d/$NAME
 
