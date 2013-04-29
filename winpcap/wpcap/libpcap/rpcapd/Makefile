@@ -61,6 +61,11 @@ endif
 $(TARGET): $(FILES)
 	$(CC) $(CFLAGS) $(INCLUDE) $(LIBPATH) -o $(TARGET) $(FILES) $(LIB)
 
+install:
+	cp $(LINUXTARGET) rpcapd-dist/rpcapd-64bit-linux
+	chmod 0755 rpcapd-dist/rpcapd-64bit-linux
+
 clean:
 	rm -f rpcapd rpcapd.exe
 
+distclean: clean

@@ -2,9 +2,9 @@
 
 # curl --fail -k 'https://<extrahop_ip>/tools/rpcapd/install-rpcapd.sh' > install-rpcapd.sh && sudo sh ./install-rpcapd.sh <extrahop_ip> <rpcap_port_from_running_config>
 
-RPCAPD_BIN_PATH="/usr/sbin/rpcapd"
+RPCAPD_BIN_PATH="/opt/extrahop/sbin/rpcapd"
 RPCAPD_INIT_PATH="/etc/init.d/rpcapd"
-RPCAPD_CFG_PATH="/etc/rpcapd.ini"
+RPCAPD_CFG_PATH="/opt/extrahop/etc/rpcapd.ini"
 
 usage() {
     cat 2<&1 <<EOM
@@ -121,6 +121,7 @@ elif [ -x "$RPCAPD_INIT_PATH" ]; then
     $RPCAPD_INIT_PATH stop
 fi
 if [ -z "$cfg_update_only" ]; then
+	mkdir -p $(dirname "${RPCAPD_BIN_PATH}")
     if [ -n "$no_fetch" ]; then
         ensure_exists "$fetch_dir/$rpcapd_bin"
         ensure_exists "$fetch_dir/$rpcapd_init"
@@ -157,6 +158,7 @@ echo "Writing config to $RPCAPD_CFG_PATH with contents:"
 echo "$cfg"
 
 set -e
+mkdir -p $(dirname "${RPCAPD_CFG_PATH}")
 echo "$cfg" > "$RPCAPD_CFG_PATH"
 chmod 644 "$RPCAPD_CFG_PATH"
 set +e

@@ -20,5 +20,7 @@ Packet.dll: ${OBJS}
 clean:
 	${RM} ${OBJS} libpacket.a Packet.dll
 
+distclean: clean
+
 install: Packet.dll
-	cp Packet.dll c:/winnt/system32
+	#cp Packet.dll c:/winnt/system32

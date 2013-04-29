@@ -3,3 +3,4 @@ wpcap/libpcap/scanner.c
 wpcap/libpcap/tokdefs.h
 wpcap/libpcap/rpcapd/rpcapd
 wpcap/libpcap/rpcapd/rpcapd.exe
+install-rpcapd.sh

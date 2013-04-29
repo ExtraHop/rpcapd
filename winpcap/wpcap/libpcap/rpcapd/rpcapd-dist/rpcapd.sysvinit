@@ -24,8 +24,8 @@
 . /etc/sysconfig/network
 
 NAME=rpcapd
-CONF=/etc/rpcapd.ini
-DAEMON=/usr/sbin/$NAME
+CONF=/opt/extrahop/etc/rpcapd.ini
+DAEMON=/opt/extrahop/sbin/$NAME
 DAEMON_ARGS="-v -d -L -f $CONF"
 PIDFILE=/var/run/$NAME.pid
 # lockfile=/var/lock/subsys/$NAME

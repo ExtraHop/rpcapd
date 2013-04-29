@@ -82,6 +82,8 @@ install:
 clean:
 	${RM} ${OBJS} ../libpcap/scanner.c ../libpcap/grammar.c wpcap.a wpcap.dll
 
+distclean: clean
+
 # Keeps intermediate .c files from being deleted
 .SECONDARY: ../libpcap/scanner.c ../libpcap/grammar.c
 

@@ -12,11 +12,11 @@
 # Do NOT "set -e"
 
 # PATH should only include /usr/* if it runs after the mountnfs.sh script
-PATH=/sbin:/usr/sbin:/bin:/usr/bin
+PATH=/sbin:/usr/sbin:/bin:/usr/bin:/opt/extrahop/bin:/opt/extrahop/sbin
 DESC="rpcapd Packet Forwarder"
 NAME=rpcapd
-DAEMON=/usr/sbin/$NAME
-DAEMON_ARGS="-v -d -L -f /etc/rpcapd.ini"
+DAEMON=/opt/extrahop/sbin/$NAME
+DAEMON_ARGS="-v -d -L -f /opt/extrahop/etc/rpcapd.ini"
 PIDFILE=/var/run/$NAME.pid
 SCRIPTNAME=/etc/init.d/$NAME
 
