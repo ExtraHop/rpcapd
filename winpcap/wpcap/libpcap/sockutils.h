@@ -151,11 +151,15 @@ extern void log_info(const char *fmt, ...) __FORMAT(printf, 1, 2);
 #define SOCK_ASSERT(msg, expr) ((void)0)
 #else
 	#include <assert.h>
-	#if (defined(WIN32) && defined(_MSC_VER))
-		#include <crtdbg.h>				// for _CrtDbgReport
-		// Use MessageBox(NULL, msg, "warning", MB_OK)' instead of the other calls if you want to debug a Win32 service
-		// Remember to activate the 'allow service to interact with desktop' flag of the service
-		#define SOCK_ASSERT(msg, expr) { _CrtDbgReport(_CRT_WARN, NULL, 0, NULL, "%s\n", msg); fprintf(stderr, "%s\n", msg); assert(expr); }
+	#ifdef WIN32
+		#ifdef _MSC_VER
+			#include <crtdbg.h>				// for _CrtDbgReport
+			// Use MessageBox(NULL, msg, "warning", MB_OK)' instead of the other calls if you want to debug a Win32 service
+			// Remember to activate the 'allow service to interact with desktop' flag of the service
+			#define SOCK_ASSERT(msg, expr) { _CrtDbgReport(_CRT_WARN, NULL, 0, NULL, "%s\n", msg); fprintf(stderr, "%s\n", msg); assert(expr); }
+		#else
+			#define SOCK_ASSERT(msg, expr) { fprintf(stderr, "%s\n", msg); assert(expr); }
+		#endif
 	#else
 		#define SOCK_ASSERT(msg, expr) { log_warn("%s", msg); assert(expr); }
 	#endif
