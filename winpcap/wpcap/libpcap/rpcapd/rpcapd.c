@@ -410,7 +410,7 @@ int k;
 
 		// If this call succeeds, it is blocking on Win32
 		if ( svc_start() != 1)
-			SOCK_ASSERT(1, "Unable to start the service");
+			SOCK_ASSERT("Unable to start the service", 1);
 
 		// When the previous call returns, the entire application has to be stopped.
 		exit(0);

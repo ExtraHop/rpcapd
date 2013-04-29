@@ -1940,8 +1940,8 @@ daemon_sendv_udp(struct daemon_ctx *fp, ex_iovec *iov,
             }
         }
         else if (wlen >= 0) {
-            log_warn("WARNING: sendv(udp_fd) returned %zd, expected %u",
-                     wlen, iov_len);
+            log_warn("WARNING: sendv(udp_fd) returned %d, expected %u",
+                     (int)wlen, iov_len);
         }
         else {
             snprintf(fp->errbuf, PCAP_ERRBUF_SIZE,
