@@ -76,8 +76,9 @@ main: ${OBJS}
 	mkdir ../lib/
 	${CC} ${CFLAGS} ${LDFLAGS} -o wpcap.dll WPCAP.DEF ${OBJS} ${LIBS}
 
+# EXTRAHOP: do nothing
 install:
-	cp wpcap.dll ${INSTALL_DIR}
+	#cp wpcap.dll ${INSTALL_DIR}
 
 clean:
 	${RM} ${OBJS} ../libpcap/scanner.c ../libpcap/grammar.c wpcap.a wpcap.dll

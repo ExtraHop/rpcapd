@@ -22,5 +22,6 @@ clean:
 
 distclean: clean
 
-install: Packet.dll
+# EXTRAHOP: do nothing
+install: #Packet.dll
 	#cp Packet.dll c:/winnt/system32
