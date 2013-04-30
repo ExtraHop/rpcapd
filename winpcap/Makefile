@@ -4,6 +4,7 @@ PKG = rpcapd.tgz
 INSTALLER_TARGET = install-rpcapd.sh
 RPCAPD_TARGET = rpcapd
 RPCAPD_DIST_DIR = wpcap/libpcap/rpcapd/rpcapd-dist
+# for Linux:
 RPCAPD_FILES = \
     rpcapd-64bit-linux          \
 	rpcapd.sh                   \
@@ -32,6 +33,16 @@ install: $(SUBDIRS)
 	$(INSTALL) -m 0755 $(INSTALLER_TARGET) install/www/tools
 	$(INSTALL) -d install/www/tools/rpcapd
 	sh $(INSTALLER_TARGET) --extract install/www/tools/rpcapd
+#	Windows: put PS script both in .zip and outside it
+	zip -j install/www/tools/rpcapd/rpcapd-64bit-windows.zip \
+		   packetNtx/driver/npf.sys \
+		   packetNtx/Dll/Project/Packet.dll \
+		   ../win32-pthreads/pthreadGC2.dll \
+		   wpcap/PRJ/wpcap.dll \
+		   wpcap/libpcap/rpcapd/rpcapd.exe \
+		   wpcap/libpcap/rpcapd/rpcapd-dist/install-rpcapd.ps1
+	$(INSTALL) -m 755 wpcap/libpcap/rpcapd/rpcapd-dist/install-rpcapd.ps1 \
+					  install/www/tools/install-rpcapd.ps1
 	tar -C install -cvzf $(PACKAGES)/$(PKG) .
 
 .PHONY: distclean
