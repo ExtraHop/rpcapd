@@ -31,10 +31,8 @@ install: $(SUBDIRS)
 	$(INSTALL) -d install/www
 	$(INSTALL) -d install/www/tools
 	$(INSTALL) -m 0755 $(INSTALLER_TARGET) install/www/tools
-	$(INSTALL) -d install/www/tools/rpcapd
-	sh $(INSTALLER_TARGET) --extract install/www/tools/rpcapd
 #	Windows: put PS script both in .zip and outside it
-	zip -j install/www/tools/rpcapd/rpcapd-64bit-windows.zip \
+	zip -j install/www/tools/rpcapd-64bit-windows.zip \
 		   packetNtx/driver/npf.sys \
 		   packetNtx/Dll/Project/Packet.dll \
 		   ../win32-pthreads/pthreadGC2.dll \
