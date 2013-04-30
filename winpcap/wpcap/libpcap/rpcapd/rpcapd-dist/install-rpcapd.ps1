@@ -1,11 +1,11 @@
 param (
-    [parameter(mandatory=$true)][string]$MgmtIP,
+    [parameter(mandatory=$false)][string]$MgmtIP,
     [parameter(mandatory=$true)][string]$RpcapIP,
     [parameter(mandatory=$false)][string]$InputDir,
     [parameter(mandatory=$false)][string]$OutputDir,
     [parameter(mandatory=$false)][string]$ZipUrl,
     [switch]$ConfigOnly,
-    [int]$RpcapPort = 2007
+    [int]$RpcapPort = 2003
 )
 
 $erroractionpreference = "stop"
@@ -17,7 +17,7 @@ $pfnames = @("Packet.dll", "pthreadGC2.dll", "wpcap.dll", "rpcapd.exe")
 $sysname = "npf.sys"
 $service_name = "rpcapd"
 if ($ZipUrl -eq "") {
-    $ZipUrl = "https://${MgmtIP}/tools/rpcapd/rpcapd-64bit-windows.zip"
+    $ZipUrl = "http://${MgmtIP}/tools/rpcapd-64bit-windows.zip"
 }
 
 $config = @"
@@ -109,8 +109,7 @@ try {
 catch {
     write-host "Creating $service_name service..."
     $nothing = new-service -name $service_name -binarypathname $exepath `
-                           -displayname $service_name
-                           -description "Remote Packet Capture"
+                           -displayname "Remote Packet Capture (rpcapd)"
 }
 write-host "Starting $service_name service..."
 start-service -name $service_name
