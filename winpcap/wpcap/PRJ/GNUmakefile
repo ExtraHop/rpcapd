@@ -81,6 +81,7 @@ install:
 	#cp wpcap.dll ${INSTALL_DIR}
 
 clean:
+	@${RM} -rf ../lib/
 	${RM} ${OBJS} ../libpcap/scanner.c ../libpcap/grammar.c wpcap.a wpcap.dll
 
 distclean: clean
