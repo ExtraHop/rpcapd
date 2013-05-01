@@ -18,11 +18,7 @@ if [ "${1}" = "-x" -o "${1}" = "--extract" ]; then
     echo "Extracting files to ${EXTRACTDIR}"
 else
     if [ "${#}" -lt 2 ]; then
-        cat 2<&1 <<EOM
-Usage: ${0} <extrahop ip> <rpcap port>
-To extract files only: ${0} --extract dir
-    (dir is optional)
-EOM
+        echo "Usage: $0 <extrahop ip> <rpcap port>" >&2
         exit 2
     fi
     export EXTRACTDIR=$(mktemp -d)
