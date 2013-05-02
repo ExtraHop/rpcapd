@@ -64,7 +64,7 @@ if ($InputDir -eq "") {
     write-host "Download succeeded, unzipping to ${unzipped}..."
     try {
         $shell = new-object -com shell.application
-        $nothing = new-item -itemtype directory -path $unzipped
+        new-item -itemtype directory -path $unzipped > $null
         $shell.namespace($unzipped).copyhere($shell.namespace($zipfile).items())
     }
     catch {
@@ -80,7 +80,7 @@ else {
 }
 
 try {
-    $nothing = get-item -path $unzipped
+    get-item -path $unzipped > $null
 }
 catch {
     throw "Couldn't find directory ${unzipped}"
@@ -93,6 +93,14 @@ catch {
     $pfdir = new-item -itemtype directory -path $pfpath
 }
 
+$serv = $null
+try {
+    $serv = get-service -name $service_name
+    write-host "Stopping $service_name service..."
+    stop-service -inputobject $serv
+}
+catch { }
+
 write-host "Copying files to ${pfpath}..."
 $pfnames | foreach-object {
     copy-item -path "${unzipped}\${_}" -destination $pfdir
@@ -103,15 +111,12 @@ copy-item -path "${unzipped}\${sysname}" -destination $sysdest
 
 WriteConfig
 
-try {
-    $serv = get-service -name $service_name
-}
-catch {
+if ($serv -eq $null) {
     write-host "Creating $service_name service..."
-    $nothing = new-service -name $service_name -binarypathname $exepath `
-                           -displayname "Remote Packet Capture (rpcapd)"
+    $serv = new-service -name $service_name -binarypathname $exepath `
+                        -displayname "Remote Packet Capture (rpcapd)"
 }
 write-host "Starting $service_name service..."
-start-service -name $service_name
+start-service -inputobject $serv
 write-host "Success!"
 
