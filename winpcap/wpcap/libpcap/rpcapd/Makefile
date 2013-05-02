@@ -48,8 +48,8 @@ else ifeq ($(PLATFORM), linux)
 	TARGET = $(LINUXTARGET)
 else
 default:
-	$(MAKE) PLATFORM=linux
-	$(MAKE) PLATFORM=windows
+	$(MAKE) PLATFORM=linux executable
+	$(MAKE) PLATFORM=windows executable
 endif
 
 
@@ -58,7 +58,7 @@ endif
 #  command line
 
 # XXX: using object files would make incremental rebuilds faster...
-$(TARGET): $(FILES)
+executable: $(FILES)
 	$(CC) $(CFLAGS) $(INCLUDE) $(LIBPATH) -o $(TARGET) $(FILES) $(LIB)
 
 install:
