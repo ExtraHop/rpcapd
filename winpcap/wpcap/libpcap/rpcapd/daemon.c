@@ -71,8 +71,7 @@ set_non_blocking(int fd)
 int
 set_non_blocking(int fd)
 {
-    log_warn("WARNING: %s(fd=%d) not implemented on this platform",
-             __func__, fd);
+    return 0;
 }
 
 #define ex_iovec    WSABUF
@@ -1809,15 +1808,15 @@ daemon_set_sndbuf_size(struct daemon_ctx *fp)
     if (rpcapd_opt.udp_sndbuf_size < 16384) {
         rpcapd_opt.udp_sndbuf_size = 8388608;
     }
-    log_info("setting udp pkt sndbuf to %d bytes",
-             rpcapd_opt.udp_sndbuf_size);
 #ifdef SO_SNDBUFFORCE
 #define DAEMON_SO_SNDBUF    SO_SNDBUFFORCE
 #else
 #define DAEMON_SO_SNDBUF    SO_SNDBUF
+#ifndef WIN32
     log_warn("SO_SNDBUFFORCE does not exist on this kernel, adjust manually:");
     log_warn("  $ sudo -i");
     log_warn("  $ echo 8388608 > /proc/sys/net/core/wmem_max");
+#endif
 #endif
     if (setsockopt(fp->rmt_sockdata, SOL_SOCKET, DAEMON_SO_SNDBUF,
                    (char *)&rpcapd_opt.udp_sndbuf_size, sizeof(int)) < 0) {
@@ -1829,7 +1828,6 @@ daemon_set_sndbuf_size(struct daemon_ctx *fp)
         log_warn("WARNING: getsockopt(SO_SNDBUF) failed: %s",
                  strerror(errno));
     }
-    log_info("    udp pkt sndbuf is set to %d bytes", sndbuf);
 }
 
 void
@@ -1850,7 +1848,7 @@ daemon_set_ip_recverr(struct daemon_ctx *fp)
                  strerror(errno));
     }
     log_info("    IP_RECVERR is set to %d", one);
-#else
+#elif !defined(WIN32)
     log_warn("WARNING: current platform doesn't support IP_RECVERR");
 #endif
 }
@@ -2420,11 +2418,7 @@ pcap_handler dispatch_cb = daemon_dispatch_cb_threaded;
 	daemon_set_sndbuf_size(fp);
 	daemon_set_ip_recverr(fp);
 
-	if (rpcapd_opt.blocking_udp_socket) {
-	    log_info("udp pkt socket blocking");
-	}
-	else {
-	    log_info("udp pkt socket non-blocking");
+	if (!rpcapd_opt.blocking_udp_socket) {
         if (set_non_blocking(fp->rmt_sockdata) < 0) {
             log_warn("WARNING: set_non_blocking(udp sock) failed: %s",
                      strerror(errno));
@@ -2434,12 +2428,8 @@ pcap_handler dispatch_cb = daemon_dispatch_cb_threaded;
 	daemon_set_cpu_and_nice(rpcapd_opt.cpu_affinity_pcap,
 	                        rpcapd_opt.nice_pcap);
 
-	if (rpcapd_opt.udp_mtu > 0) {
-	    log_info("udp mtu %u", rpcapd_opt.udp_mtu);
-	}
-
 	if (rpcapd_opt.single_threaded) {
-	    log_info("Starting in single-threaded mode");
+	    log_info("Ready to forward packets in single-threaded mode");
 	    dispatch_cb = daemon_dispatch_cb_single_thr;
 	}
 	else {

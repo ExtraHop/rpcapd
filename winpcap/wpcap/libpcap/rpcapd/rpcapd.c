@@ -586,8 +586,6 @@ void main_cleanup(int sign)
 	kill(0, SIGKILL);
 #endif
 
-	log_warn(PROGRAM_NAME " is closing.\n");
-
 	// FULVIO (bug)
 	// Here we close only the latest 'sockmain' created; if we opened more than one waiting sockets, 
 	// only the latest one is closed correctly.
@@ -803,10 +801,9 @@ struct daemon_slpars *pars;			// parameters needed by the daemon_serviceloop()
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_family= activepars->ai_family;
 
-	snprintf(errbuf, PCAP_ERRBUF_SIZE, "Connecting to host %s, port %s, using protocol %s",
-			activepars->address, activepars->port, (hints.ai_family == AF_INET) ? "IPv4": 
-			(hints.ai_family == AF_INET6) ? "IPv6" : "Unspecified");
-	log_warn("%s", errbuf);
+	log_info("Connecting to host %s, port %s, using protocol %s",
+			 activepars->address, activepars->port, (hints.ai_family == AF_INET) ? "IPv4":
+			 (hints.ai_family == AF_INET6) ? "IPv6" : "Unspecified");
 
 	// Initialize errbuf
 	memset(errbuf, 0, sizeof(errbuf) );
