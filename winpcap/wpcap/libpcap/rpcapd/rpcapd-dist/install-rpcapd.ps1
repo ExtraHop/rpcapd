@@ -12,10 +12,12 @@ $erroractionpreference = "stop"
 
 $pfpath = "${Env:ProgramFiles}\rpcapd"
 $confpath = "${pfpath}\rpcapd.ini"
-$exepath = "`"${pfpath}\rpcapd.exe`" -v -d -f `"${confpath}`""
+$exepath = "${pfpath}\rpcapd.exe"
+$execmd = "`"${exepath}`" -v -d -L -f `"${confpath}`""
 $pfnames = @("Packet.dll", "pthreadGC2.dll", "wpcap.dll", "rpcapd.exe")
 $sysname = "npf.sys"
 $service_name = "rpcapd"
+$rpath = "HKLM:\SYSTEM\CurrentControlSet\services\eventlog\Application\rpcapd"
 if ($ZipUrl -eq "") {
     $ZipUrl = "http://${MgmtIP}/tools/rpcapd-64bit-windows.zip"
 }
@@ -111,9 +113,19 @@ copy-item -path "${unzipped}\${sysname}" -destination $sysdest
 
 WriteConfig
 
+write-host "Adding event source to registry at ${rpath}..."
+remove-item -path $rpath -erroraction silentlycontinue
+new-item -path $rpath > $null
+new-itemproperty -path $rpath -name EventMessageFile -type string `
+                 -value $exepath > $null
+new-itemproperty -path $rpath -name ParameterMessageFile -type string `
+                 -value $exepath > $null
+new-itemproperty -path $rpath -name TypesSupported -type dword `
+                 -value 0x7 > $null
+
 if ($serv -eq $null) {
     write-host "Creating $service_name service..."
-    $serv = new-service -name $service_name -binarypathname $exepath `
+    $serv = new-service -name $service_name -binarypathname $execmd `
                         -displayname "Remote Packet Capture (rpcapd)"
 }
 write-host "Starting $service_name service..."

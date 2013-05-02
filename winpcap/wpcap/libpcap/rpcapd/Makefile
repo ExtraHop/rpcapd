@@ -24,7 +24,7 @@ WINLIBPATH   = -L../../lib -L../../../../win32-pthreads \
 # Files that are needed to compile this project
 FILES = rpcapd.c daemon.c utils.c fileconf.c ../pcap-remote.c ../sockutils.c \
 		../pcap-new.c
-WINFILES = win32-svc.c
+WINFILES = win32-svc.c win32-messages.o
 
 LINUXTARGET = rpcapd
 WINTARGET   = rpcapd.exe
@@ -61,11 +61,16 @@ endif
 executable: $(FILES)
 	$(CC) $(CFLAGS) $(INCLUDE) $(LIBPATH) -o $(TARGET) $(FILES) $(LIB)
 
+win32-messages.o: win32-messages.mc
+	x86_64-w64-mingw32-windmc $<
+	x86_64-w64-mingw32-windres -i win32-messages.rc -o $@
+
 install:
 	cp $(LINUXTARGET) rpcapd-dist/rpcapd-64bit-linux
 	chmod 0755 rpcapd-dist/rpcapd-64bit-linux
 
 clean:
-	rm -f rpcapd rpcapd.exe
+	rm -f rpcapd rpcapd.exe win32-messages.bin win32-messages.h \
+		  win32-messages.rc
 
 distclean: clean
