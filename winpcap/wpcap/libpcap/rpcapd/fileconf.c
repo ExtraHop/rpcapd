@@ -38,7 +38,6 @@
 #include <pcap.h>		// for PCAP_ERRBUF_SIZE
 #include "rpcapd.h"
 #include "pcap-remote.h"
-#include "sockutils.h"	// for SOCK_ASSERT
 
 
 extern char hostlist[MAX_HOST_LIST + 1];		//!< Keeps the list of the hosts that are allowed to connect to this server
@@ -55,7 +54,6 @@ int strrem(char *string, char chr);
 void fileconf_read(int sign)
 {
 FILE *fp;
-char msg[PCAP_ERRBUF_SIZE + 1];
 int i;
 
 #ifndef WIN32
@@ -97,7 +95,7 @@ int i;
 					activelist[i].port[MAX_LINE] = 0;
 				}
 				else
-					SOCK_ASSERT("Only MAX_ACTIVE_LIST active connections are currently supported.", 1);
+					log_warn("Only MAX_ACTIVE_LIST active connections are currently supported.");
 
 				i++;
 				continue;
@@ -134,8 +132,7 @@ int i;
 		strrem(hostlist, '\r');
 		strrem(hostlist, '\n');
 
-		snprintf(msg, PCAP_ERRBUF_SIZE, "New passive host list: %s\n\n", hostlist);
-		SOCK_ASSERT(msg, 1);
+		//log_info("New passive host list: %s\n\n", hostlist);
 		fclose(fp);
 	}
 }

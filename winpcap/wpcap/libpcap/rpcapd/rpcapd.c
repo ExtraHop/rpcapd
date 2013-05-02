@@ -208,7 +208,7 @@ int k;
 
 	if (sock_init(errbuf, PCAP_ERRBUF_SIZE) == -1)
 	{
-		SOCK_ASSERT(errbuf, 1);
+		log_warn("%s", errbuf);
 		exit(-1);
 	}
 
@@ -274,7 +274,7 @@ int k;
 				}
 				
 				if (i > MAX_ACTIVE_LIST)
-					SOCK_ASSERT("Only MAX_ACTIVE_LIST active connections are currently supported.", 1);
+					log_warn("Only MAX_ACTIVE_LIST active connections are currently supported.");
 
 				// I don't initialize the remaining part of the structure, since
 				// it is already zeroed (it is a global var)
@@ -363,7 +363,7 @@ int k;
 	if (savefile[0])
 	{
 		if (fileconf_save(savefile) )
-			SOCK_ASSERT("Error when saving the configuration to file", 1);
+			log_warn("Error when saving the configuration to file");
 	}
 
 	// If the file does not exist, it keeps the settings provided by the command line
@@ -410,7 +410,7 @@ int k;
 
 		// If this call succeeds, it is blocking on Win32
 		if ( svc_start() != 1)
-			SOCK_ASSERT("Unable to start the service", 1);
+			log_warn("Unable to start the service");
 
 		// When the previous call returns, the entire application has to be stopped.
 		exit(0);
@@ -469,7 +469,7 @@ int i;
 
 		if ( pthread_create( &threadId, &detachedAttribute, (void *) &main_active, (void *) &activelist[i]) )
 		{
-			SOCK_ASSERT("Error creating the active child thread", 1);
+			log_warn("Error creating the active child thread");
 			pthread_attr_destroy(&detachedAttribute);
 			continue;
 		}
@@ -503,7 +503,7 @@ int i;
 		// Do the work
 		if (sock_initaddress((address[0]) ? address : NULL, port, &mainhints, &addrinfo, errbuf, PCAP_ERRBUF_SIZE) == -1)
 		{
-			SOCK_ASSERT(errbuf, 1);
+			log_warn("%s", errbuf);
 			return;
 		}
 
@@ -515,7 +515,7 @@ int i;
 
 			if ( (sockmain= sock_open(tempaddrinfo, SOCKOPEN_SERVER, SOCKET_MAXCONN, errbuf, PCAP_ERRBUF_SIZE)) == -1)
 			{
-				SOCK_ASSERT(errbuf, 1);
+				log_warn("%s", errbuf);
 				tempaddrinfo= tempaddrinfo->ai_next;
 				continue;
 			}
@@ -537,7 +537,7 @@ int i;
 
 			if ( pthread_create( &threadId, &detachedAttribute, (void *) &main_passive, (void *) socktemp ) )
 			{
-				SOCK_ASSERT("Error creating the passive child thread", 1);
+				log_warn("Error creating the passive child thread");
 				pthread_attr_destroy(&detachedAttribute);
 				continue;
 			}
@@ -586,7 +586,7 @@ void main_cleanup(int sign)
 	kill(0, SIGKILL);
 #endif
 
-	SOCK_ASSERT(PROGRAM_NAME " is closing.\n", 1);
+	log_warn(PROGRAM_NAME " is closing.\n");
 
 	// FULVIO (bug)
 	// Here we close only the latest 'sockmain' created; if we opened more than one waiting sockets, 
@@ -627,7 +627,7 @@ int stat;
 	// For reference, Stevens, pg 128
 
 	while ( (pid= waitpid(-1, &stat, WNOHANG) ) > 0)
-		SOCK_ASSERT("Child terminated", 1);
+		log_warn("Child terminated");
 
 	return;
 }
@@ -700,7 +700,7 @@ SOCKET sockmain;
 			// Don't check for errors here, since the error can be due to the fact that the thread 
 			// has been killed
 			sock_geterror("accept(): ", errbuf, PCAP_ERRBUF_SIZE);
-			SOCK_ASSERT(errbuf, 1);
+			log_warn("%s", errbuf);
 			continue;
 		}
 
@@ -733,7 +733,7 @@ SOCKET sockmain;
 		pthread_attr_setdetachstate(&detachedAttribute, PTHREAD_CREATE_DETACHED);
 		if ( pthread_create( &threadId, &detachedAttribute, (void *) &daemon_serviceloop, (void *) pars) )
 		{
-			SOCK_ASSERT("Error creating the child thread", 1);
+			log_warn("Error creating the child thread");
 			pthread_attr_destroy(&detachedAttribute);
 			continue;
 		}
@@ -806,7 +806,7 @@ struct daemon_slpars *pars;			// parameters needed by the daemon_serviceloop()
 	snprintf(errbuf, PCAP_ERRBUF_SIZE, "Connecting to host %s, port %s, using protocol %s",
 			activepars->address, activepars->port, (hints.ai_family == AF_INET) ? "IPv4": 
 			(hints.ai_family == AF_INET6) ? "IPv6" : "Unspecified");
-	SOCK_ASSERT(errbuf, 1);
+	log_warn("%s", errbuf);
 
 	// Initialize errbuf
 	memset(errbuf, 0, sizeof(errbuf) );
@@ -814,7 +814,7 @@ struct daemon_slpars *pars;			// parameters needed by the daemon_serviceloop()
 	// Do the work
 	if (sock_initaddress(activepars->address, activepars->port, &hints, &addrinfo, errbuf, PCAP_ERRBUF_SIZE) == -1)
 	{
-		SOCK_ASSERT(errbuf, 1);
+		log_warn("%s", errbuf);
 		return;
 	}
 
@@ -824,13 +824,13 @@ struct daemon_slpars *pars;			// parameters needed by the daemon_serviceloop()
 
 		if ( (sockctrl= sock_open(addrinfo, SOCKOPEN_CLIENT, 0, errbuf, PCAP_ERRBUF_SIZE)) == -1)
 		{
-			SOCK_ASSERT(errbuf, 1);
+			log_warn("%s", errbuf);
 
 			snprintf(errbuf, PCAP_ERRBUF_SIZE, "Error connecting to host %s, port %s, using protocol %s",
 					activepars->address, activepars->port, (hints.ai_family == AF_INET) ? "IPv4": 
 					(hints.ai_family == AF_INET6) ? "IPv6" : "Unspecified" );
 
-			SOCK_ASSERT(errbuf, 1);
+			log_warn("%s", errbuf);
 
 			pthread_suspend(RPCAP_ACTIVE_WAIT * 1000);
 

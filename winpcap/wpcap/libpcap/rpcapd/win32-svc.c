@@ -36,7 +36,6 @@
 #define	_WINSOCKAPI_
 #include "windows.h"
 #include <pcap.h>		// for PCAP_ERRBUF_SIZE
-#include "sockutils.h"	// for SOCK_ASSERT
 #include "fileconf.h"
 
 
@@ -69,7 +68,6 @@ int svc_start(void)
 
 void svc_geterr(char *str)
 {
-char message[PCAP_ERRBUF_SIZE];
 char string[PCAP_ERRBUF_SIZE];
 int val;
 
@@ -79,9 +77,7 @@ int val;
 				  NULL, val, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
 				  (LPSTR) string, PCAP_ERRBUF_SIZE, NULL);
 
-	snprintf(message, PCAP_ERRBUF_SIZE, "%s failed with error %d: %s", str, val, string);
-
-	SOCK_ASSERT(message, 1);
+	log_warn("%s failed with error %d: %s", str, val, string);
 }
 
 

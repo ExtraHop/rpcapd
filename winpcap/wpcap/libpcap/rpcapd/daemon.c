@@ -409,7 +409,7 @@ auth_again:
 			// So, this was a fake connection. Drop it down
 			if (retval == 0)
 			{
-				SOCK_ASSERT("The RPCAP runtime timeout has expired", 1);
+				log_warn("The RPCAP runtime timeout has expired");
 				rpcap_senderror(pars->sockctrl, "The RPCAP runtime timeout has expired", PCAP_ERR_RUNTIMETIMEOUT, NULL);
 				goto end;
 			}
@@ -459,7 +459,7 @@ auth_again:
 					sock_discard(pars->sockctrl, ntohl(header.plen), errbuf, PCAP_ERRBUF_SIZE);
 
 				if (daemon_findalldevs(pars->sockctrl, errbuf) )
-					SOCK_ASSERT(errbuf, 1);
+					log_warn("%s", errbuf);
 
 				break;
 			};
@@ -469,7 +469,7 @@ auth_again:
 				retval= daemon_opensource(pars->sockctrl, source, sizeof(source), ntohl(header.plen), errbuf);
 
 				if (retval == -1)
-					SOCK_ASSERT(errbuf, 1);
+					log_warn("%s", errbuf);
 
 				break;
 			};
@@ -479,7 +479,7 @@ auth_again:
 				retval= daemon_setsampling(pars->sockctrl, &samp_param, ntohl(header.plen), errbuf);
 
 				if (retval == -1)
-					SOCK_ASSERT(errbuf, 1);
+					log_warn("%s", errbuf);
 
 				break;
 			};
@@ -489,7 +489,7 @@ auth_again:
 				fp= daemon_startcapture(pars->sockctrl, &threaddata, source, pars->isactive, &samp_param, ntohl(header.plen), errbuf);
 
 				if (fp == NULL)
-					SOCK_ASSERT(errbuf, 1);
+					log_warn("%s", errbuf);
 
 				break;
 			};
@@ -499,7 +499,7 @@ auth_again:
 				if (fp)
 				{
 					if (daemon_updatefilter(fp, ntohl(header.plen)) )
-						SOCK_ASSERT(pcap_geterr(fp->fp), 1);
+						log_warn("%s", pcap_geterr(fp->fp));
 				}
 				else
 				{
@@ -518,14 +518,14 @@ auth_again:
 				if (fp)
 				{
 					if (daemon_getstats(fp) )
-						SOCK_ASSERT(pcap_geterr(fp->fp), 1);
+						log_warn("%s", pcap_geterr(fp->fp));
 				}
 				else
 				{
-					SOCK_ASSERT("GetStats: this call should't be allowed here", 1);
+					log_warn("GetStats: this call should't be allowed here");
 
 					if (daemon_getstatsnopcap(pars->sockctrl, ifdrops, ifrecv, krnldrop, svrcapt, errbuf) )
-						SOCK_ASSERT(errbuf, 1);
+						log_warn("%s", errbuf);
 					// we have to keep compatibility with old applications, which ask for statistics
 					// also when the capture has already stopped
 
@@ -553,7 +553,7 @@ auth_again:
 						ifdrops= ifrecv= krnldrop= svrcapt= 0;
 
 					if ( daemon_endcapture(fp, &threaddata, errbuf) )
-						SOCK_ASSERT(errbuf, 1);
+						log_warn("%s", errbuf);
 					fp= NULL;
 				}
 				else
@@ -568,7 +568,7 @@ auth_again:
 				// signal to the main that the user closed the control connection
 				// This is used only in case of active mode
 				pars->activeclose= 1;	
-				SOCK_ASSERT("The other end system asked to close the connection.", 1);
+				log_warn("The other end system asked to close the connection.");
 				goto end;
 				break;
 			};
@@ -576,13 +576,13 @@ auth_again:
 			case RPCAP_MSG_ERROR:		// The other endpoint reported an error
 			{
 				// Do nothing; just exit; the error code is already into the errbuf
-				SOCK_ASSERT(errbuf, 1);
+				log_warn("%s", errbuf);
 				break;
 			};
 
 			default:
 			{
-				SOCK_ASSERT("Internal error.", 1);
+				log_warn("Internal error.");
 				break;
 			};
 		}
@@ -617,8 +617,8 @@ end:
 	}
 
 	// Print message and exit
-	SOCK_ASSERT("I'm exiting from the child loop", 1);
-	SOCK_ASSERT(errbuf, 1);
+	log_warn("I'm exiting from the child loop");
+	log_warn("%s", errbuf);
 
 	if (!pars->isactive)
 	{
@@ -706,7 +706,7 @@ int retcode;						// the value we have to return to the caller
 
 			default:
 			{
-				SOCK_ASSERT("Internal error.", 1);
+				log_warn("Internal error.");
 				retcode= -2;
 				goto error;
 			};
@@ -904,7 +904,7 @@ int daemon_AuthUserPwd(char *username, char *password, char *errbuf)
 
 /*	if (setgid(user->pw_gid) )
 	{
-		SOCK_ASSERT("setgid failed", 1);
+		log_warn("setgid failed");
 		snprintf(errbuf, PCAP_ERRBUF_SIZE, "%s", pcap_strerror(errno) );
 		return -1;
 	}
@@ -2486,7 +2486,7 @@ pcap_handler dispatch_cb = daemon_dispatch_cb_threaded;
 
 error:
 
-	SOCK_ASSERT(errbuf, 1);
+	log_warn("%s", errbuf);
  	closesocket(fp->rmt_sockdata);
 	fp->rmt_sockdata= 0;
 
