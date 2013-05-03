@@ -71,6 +71,6 @@ install:
 
 clean:
 	rm -f rpcapd rpcapd.exe win32-messages.bin win32-messages.h \
-		  win32-messages.rc
+		  win32-messages.o win32-messages.rc
 
 distclean: clean
