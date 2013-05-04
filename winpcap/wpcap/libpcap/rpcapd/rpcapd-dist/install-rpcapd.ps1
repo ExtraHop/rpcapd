@@ -100,6 +100,7 @@ try {
     $serv = get-service -name $service_name
     write-host "Stopping $service_name service..."
     stop-service -inputobject $serv
+    sleep -m 500
 }
 catch { }
 
