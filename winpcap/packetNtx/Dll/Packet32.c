@@ -32,6 +32,7 @@
  */
 
 #define UNICODE 1
+#define _UNICODE 1
 
 #pragma warning (disable : 4127)  //conditional expression is constant. Used for do{}while(FALSE) loops.
 
