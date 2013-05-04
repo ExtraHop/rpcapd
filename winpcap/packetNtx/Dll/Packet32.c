@@ -97,6 +97,22 @@ CHAR g_LogFileName[1024] = "winpcap_debug.txt";
 #include <windowsx.h>
 #include <iphlpapi.h>
 #include <ipifcons.h>
+#include <sddl.h>
+#include <winternl.h>
+#include <winnt.h>
+
+/*
+ * XXX: this is in ntdef.h, but at least in MinGW that conflicts with
+ * winternl.h, which is more useful, so just copy it in here:
+ */
+#define InitializeObjectAttributes(p,n,a,r,s) { \
+  (p)->Length = sizeof(OBJECT_ATTRIBUTES); \
+  (p)->RootDirectory = (r); \
+  (p)->Attributes = (a); \
+  (p)->ObjectName = (n); \
+  (p)->SecurityDescriptor = (s); \
+  (p)->SecurityQualityOfService = NULL; \
+}
 
 #include <WpcapNames.h>
 
@@ -171,6 +187,16 @@ dagc_finddevs_handler g_p_dagc_finddevs = NULL;
 dagc_freedevs_handler g_p_dagc_freedevs = NULL;
 #endif // HAVE_DAG_API
 
+/* XXX: I wouldn't call this a "handler", but let's match above terminology */
+typedef NTSTATUS WINAPI (*NOFHandler)(
+	PHANDLE,
+	ACCESS_MASK,
+	POBJECT_ATTRIBUTES,
+	PIO_STATUS_BLOCK,
+	ULONG,
+	ULONG);
+NOFHandler g_PNtOpenFile = NULL;
+
 BOOLEAN PacketAddAdapterDag(PCHAR name, PCHAR description, BOOLEAN IsAFile);
 
 //
@@ -188,7 +214,6 @@ __declspec (dllexport) VOID PacketRegWoemLeaveHandler(PVOID Handler)
 
 //---------------------------------------------------------------------------
 
-#ifndef _WINNT4
 //
 // This wrapper around loadlibrary appends the system folder (usually c:\windows\system32)
 // to the relative path of the DLL, so that the DLL is always loaded from an absolute path
@@ -240,7 +265,6 @@ HMODULE LoadLibrarySafe(LPCTSTR lpFileName)
 
   return hModule;
 }
-#endif
 
 /*! 
   \brief The main dll function.
@@ -368,6 +392,7 @@ VOID PacketLoadLibrariesDynamically()
 #ifdef HAVE_DAG_API
 	HMODULE DagcLib;
 #endif // HAVE_DAG_API
+	HMODULE NtdllMod;
 
 	TRACE_ENTER("PacketLoadLibrariesDynamically");
 
@@ -479,6 +504,17 @@ VOID PacketLoadLibrariesDynamically()
 	}
 #endif //HAVE_NPFIM_API
 
+	/*
+	 * MinGW has an import lib for ntdll and it seems to work, but apparently
+	 * loading it manually is the preferred method?
+	 */
+	if ((NtdllMod = LoadLibrarySafe(TEXT("ntdll.dll"))) == NULL) {
+		// Report the error but go on
+		TRACE_PRINT("ntdll library not found on this system");
+	}
+	else {
+		g_PNtOpenFile = (NOFHandler)GetProcAddress(NtdllMod, "NtOpenFile");
+	}
 
 	//
 	// Done. Release the mutex and return
@@ -1089,6 +1125,13 @@ LPADAPTER PacketOpenAdapterNPF(PCHAR AdapterNameA)
 	SERVICE_STATUS SStat;
 	BOOL QuerySStat;
 	CHAR SymbolicLinkA[MAX_PATH];
+	WCHAR AdapterNameW[MAX_PATH * 2];
+	UNICODE_STRING AdapterNameUS;
+	OBJECT_ATTRIBUTES AdapterOA;
+	NTSTATUS Status;
+	HANDLE AdapterDeviceNtHandle;
+	IO_STATUS_BLOCK isb; /* ignored */
+	PSECURITY_DESCRIPTOR AdapterDevicePSD;
 //  
 //	Old registry based WinPcap names
 //
@@ -1097,6 +1140,8 @@ LPADAPTER PacketOpenAdapterNPF(PCHAR AdapterNameA)
 
 	CHAR	NpfDriverName[MAX_WINPCAP_KEY_CHARS] = NPF_DRIVER_NAME;
 	CHAR	NpfServiceLocation[MAX_WINPCAP_KEY_CHARS];
+
+	StringCchPrintfW(AdapterNameW, MAX_PATH, L"%hs", AdapterNameA);
 
 	// Create the NPF device name from the original device name
 	TRACE_ENTER("PacketOpenAdapterNPF");
@@ -1348,7 +1393,50 @@ LPADAPTER PacketOpenAdapterNPF(PCHAR AdapterNameA)
 	
 	if (lpAdapter->hFile != INVALID_HANDLE_VALUE) 
 	{
-
+		/*
+		 * Try to set ACL on device object so only SYSTEM/Administrators have
+		 * access
+		 */
+		if (g_PNtOpenFile == NULL) {
+			goto acl_done;
+		}
+		/* RtlInitUnicodeString() is dead simple so just do it here */
+		AdapterNameUS.Buffer = AdapterNameW;
+		AdapterNameUS.Length = AdapterNameUS.MaximumLength = wcslen(AdapterNameW) * 2;
+		InitializeObjectAttributes(&AdapterOA, &AdapterNameUS, 0, NULL, NULL);
+		/* XXX: don't request FILE_ALL_ACCESS? */
+		Status = g_PNtOpenFile(
+			&AdapterDeviceNtHandle,
+			FILE_ALL_ACCESS,
+			&AdapterOA,
+			&isb,
+			FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+			0);
+		if (Status != 0) {
+			TRACE_PRINT1("couldn't open %ws", AdapterNameW);
+			goto acl_done;
+		}
+		Result = ConvertStringSecurityDescriptorToSecurityDescriptor(
+			L"D:P(A;;GA;;;SY)(A;;GA;;;BA)",
+			SDDL_REVISION_1,
+			&AdapterDevicePSD,
+			NULL);
+		if (!Result) {
+			TRACE_PRINT1("couldn't convert string to SD: %u", GetLastError());
+			goto acl_done;
+		}
+		/* XXX: should this set PROTECTED_DACL_SECURITY_INFORMATION instead? */
+		Result = SetKernelObjectSecurity(
+			AdapterDeviceNtHandle,
+			DACL_SECURITY_INFORMATION,
+			AdapterDevicePSD);
+		if (!Result) {
+			TRACE_PRINT1("couldn't set security for %ws", AdapterNameW);
+			goto acl_done;
+		}
+		LocalFree(AdapterDevicePSD);
+		AdapterDevicePSD = NULL;
+acl_done:
 		if(PacketSetReadEvt(lpAdapter)==FALSE){
 			error=GetLastError();
 			TRACE_PRINT("PacketOpenAdapterNPF: Unable to open the read event");
@@ -2207,7 +2295,7 @@ VOID PacketInitPacket(LPPACKET lpPacket,PVOID Buffer,UINT Length)
   values, here only the normal capture mode will be described.
 
   The number of packets received with this function is variable. It depends on the number of packets 
-  currently stored in the driver’s buffer, on the size of these packets and on the size of the buffer 
+  currently stored in the driver's buffer, on the size of these packets and on the size of the buffer 
   associated to the lpPacket parameter. The following figure shows the format used by the driver to pass 
   packets to the application. 
 

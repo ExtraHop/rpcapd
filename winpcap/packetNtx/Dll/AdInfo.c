@@ -1663,6 +1663,8 @@ static BOOLEAN PacketGetAdaptersAirpcap()
 
 #ifdef HAVE_NPFIM_API
 
+#error "need to secure NPFIM devices"
+
 static BOOLEAN PacketAddAdapterNpfIm(PNPF_IM_DEVICE pDevice)
 {
 	//this function should acquire the g_AdaptersInfoMutex, since it's NOT called with an ADAPTER_INFO as parameter

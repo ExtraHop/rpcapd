@@ -96,8 +96,6 @@ BOOLEAN PacketUpdateAdInfo(PCHAR AdapterName);
 BOOLEAN IsFireWire(TCHAR *AdapterDesc);
 LPADAPTER PacketOpenAdapterNPF(PCHAR AdapterName);
 
-#ifndef _WINNT4
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -105,8 +103,6 @@ HMODULE LoadLibrarySafe(LPCTSTR lpFileName);
 #ifdef __cplusplus
 }
 #endif
-
-#endif //_WINNT4
 
 // 
 // Definitions and functions specific to the CACETech airpcap API
