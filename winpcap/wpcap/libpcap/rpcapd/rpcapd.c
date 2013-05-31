@@ -202,6 +202,7 @@ void printusage()
 	"  -k <for multithreaded mode: ringbuf npkts>\n"
 	"  -S: print out stats when the other host requests them\n"
 	"  -L: Use syslog in addition to stderr\n"
+	"  -i <interface>: ExtraHop non-standard option - capture on interface\n"
     "  -h: print this help screen\n\n");
 }
 
@@ -241,7 +242,7 @@ int k;
 	mainhints.ai_socktype = SOCK_STREAM;
 
 	// Getting the proper command line options
-	while ((retval = getopt(argc, argv, "b:dhp:4l:na:s:f:vyz:u:gc:e:m:k:t:SL")) != -1)
+	while ((retval = getopt(argc, argv, "b:dhp:4l:na:s:f:vyz:u:gc:e:m:k:t:SLi:")) != -1)
 	{
 		switch (retval)
 		{
@@ -365,6 +366,14 @@ int k;
                 break;
             case 'L':
                 rpcapd_opt.use_syslog = 1;
+                break;
+            case 'i':
+                if (strlen(optarg) >= sizeof(rpcapd_opt.preselected_ifname)) {
+                    log_warn("-i option too long");
+                    break;
+                }
+                strncpy(rpcapd_opt.preselected_ifname, optarg,
+                        sizeof(rpcapd_opt.preselected_ifname));
                 break;
 			case 'h':
 				printusage();

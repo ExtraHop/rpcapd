@@ -919,10 +919,17 @@ int daemon_AuthUserPwd(char *username, char *password, char *errbuf)
 // PORTING WARNING We assume u_int is a 32bit value
 int daemon_findalldevs(SOCKET sockctrl, char *errbuf)
 {
+char new_description[256];
 char sendbuf[RPCAP_NETBUF_SIZE];			// temporary buffer in which data to be sent is buffered
 int sendbufidx= 0;							// index which keeps the number of bytes currently buffered
 pcap_if_t *alldevs;							// pointer to the heade of the interface chain
 pcap_if_t *d;								// temp pointer neede to scan the interface chain
+pcap_if_t *prev = NULL;
+pcap_if_t *orig_alldevs = NULL;
+pcap_if_t *orig_next = NULL;
+pcap_if_t *orig_prev = NULL;
+pcap_if_t *orig_prev_next = NULL;
+char *orig_description = NULL;
 uint16 plen= 0;								// length of the payload of this message
 struct pcap_addr *address;					// pcap structure that keeps a network address of an interface
 struct rpcap_findalldevs_if *findalldevs_if;// rpcap structure that packet all the data of an interface together
@@ -945,6 +952,9 @@ uint16 nif= 0;								// counts the number of interface listed
 		return -1;
 	}
 
+ compute_len:
+    plen = 0;
+    nif = 0;
 	// checks the number of interfaces and it computes the total length of the payload
 	for (d= alldevs; d != NULL; d= d->next)
 	{
@@ -952,8 +962,44 @@ uint16 nif= 0;								// counts the number of interface listed
 
 		if (d->description)
 			plen+= strlen(d->description);
-		if (d->name)
+		if (d->name) {
 			plen+= strlen(d->name);
+			if ((rpcapd_opt.preselected_ifname[0] != '\0') &&
+			    (strcmp(rpcapd_opt.preselected_ifname, d->name) == 0) &&
+			    (orig_alldevs == NULL)) {
+			    // move the preselected to the front of the alldevs list
+			    orig_alldevs = alldevs;
+			    orig_next = d->next;
+			    orig_description = d->description;
+			    if (prev != NULL) {
+			        orig_prev = prev;
+			        orig_prev_next = prev->next;
+			        orig_prev->next = d->next;
+                    d->next = orig_alldevs;
+			    }
+			    alldevs = d;
+
+			    // add suffix to the description of the preselected interface
+			    if (orig_description == NULL) {
+			        snprintf(new_description, sizeof(new_description),
+			                 ";preselected");
+			    }
+			    else {
+			        int desc_len = strlen(orig_description);
+			        if (desc_len > sizeof(new_description) - 16) {
+			            desc_len = sizeof(new_description) - 16;
+			        }
+			        snprintf(new_description, sizeof(new_description),
+			                 "%.*s ;preselected",
+			                 desc_len, orig_description);
+			    }
+			    d->description = new_description;
+
+			    // recompute payload length
+			    goto compute_len;
+			}
+			prev = d;
+		}
 
 		plen+= sizeof(struct rpcap_findalldevs_if);
 
@@ -1038,6 +1084,16 @@ uint16 nif= 0;								// counts the number of interface listed
 	if (sock_send(sockctrl, sendbuf, sendbufidx, errbuf, PCAP_ERRBUF_SIZE) == -1)
 		return -1;
 
+	// revert the changes to alldevs if we made any before freeing
+	if (orig_alldevs != NULL) {
+	    alldevs->next = orig_next;
+	    alldevs->description = orig_description;
+	    alldevs = orig_alldevs;
+	    if (orig_prev != NULL) {
+	        orig_prev->next = orig_prev_next;
+	    }
+	}
+
 	// We do no longer need the device list. Free it
 	pcap_freealldevs(alldevs);
 
@@ -1080,6 +1136,17 @@ struct rpcap_openreply *openreply;	// open reply message
 	// Puts a '0' to terminate the source string
 	source[strlen(PCAP_SRC_IF_STRING) + plen]= 0;
 
+	if ((rpcapd_opt.preselected_ifname[0] != '\0') &&
+        (strcmp(rpcapd_opt.preselected_ifname,
+                &source[strlen(PCAP_SRC_IF_STRING)]) != 0)) {
+	    // trying to open an interface that doesn't match the preselected
+	    snprintf(errbuf, PCAP_ERRBUF_SIZE,
+	             "can only open preselected interface '%s'",
+	             rpcapd_opt.preselected_ifname);
+	    rpcap_senderror(sockctrl, errbuf, PCAP_ERR_OPEN, NULL);
+	    source[0] = '\0';
+	    return -1;
+	}
 	log_info("Opening '%s'", source);
 
 	// Open the selected device

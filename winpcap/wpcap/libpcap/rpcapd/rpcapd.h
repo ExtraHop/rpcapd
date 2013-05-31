@@ -63,6 +63,7 @@ struct rpcapd_opt {
     char no_udp;
     char print_stats;
     char use_syslog;
+    char preselected_ifname[255];
 };
 
 extern struct rpcapd_opt rpcapd_opt;
