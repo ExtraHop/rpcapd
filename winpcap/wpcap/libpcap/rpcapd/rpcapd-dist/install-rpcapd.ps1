@@ -5,6 +5,7 @@ param (
     [parameter(mandatory=$false)][string]$OutputDir,
     [parameter(mandatory=$false)][string]$ZipUrl,
     [switch]$ConfigOnly,
+    [switch]$KeepConfig,
     [int]$RpcapPort = 2003
 )
 
@@ -112,7 +113,9 @@ $sysdest = "${Env:SystemRoot}\system32\drivers"
 write-host "Copying ${sysname} to ${sysdest}..."
 copy-item -path "${unzipped}\${sysname}" -destination $sysdest
 
-WriteConfig
+if (!$KeepConfig) {
+    WriteConfig
+}
 
 write-host "Adding event source to registry at ${rpath}..."
 remove-item -path $rpath -erroraction silentlycontinue
