@@ -6,7 +6,8 @@ param (
     [parameter(mandatory=$false)][string]$ZipUrl,
     [switch]$ConfigOnly,
     [switch]$KeepConfig,
-    [int]$RpcapPort = 2003
+    [int]$RpcapPort = 2003,
+    [parameter(mandatory=$false)][string]$DaemonAddlArgs
 )
 
 $erroractionpreference = "stop"
@@ -15,6 +16,9 @@ $pfpath = "${Env:ProgramFiles}\rpcapd"
 $confpath = "${pfpath}\rpcapd.ini"
 $exepath = "${pfpath}\rpcapd.exe"
 $execmd = "`"${exepath}`" -v -d -L -f `"${confpath}`""
+if ($DaemonAddlArgs) {
+    $execmd += " " + $DaemonAddlArgs
+}
 $pfnames = @("Packet.dll", "pthreadGC2.dll", "wpcap.dll", "rpcapd.exe")
 $sysname = "npf.sys"
 $service_name = "rpcapd"
