@@ -126,7 +126,7 @@ static int
 pcap_stats_win32(pcap_t *p, struct pcap_stat *ps)
 {
 
-	if(PacketGetStats(p->adapter, (struct bpf_stat*)ps) != TRUE){
+	if(PacketGetStatsEx(p->adapter, (struct bpf_stat*)ps) != TRUE){
 		snprintf(p->errbuf, PCAP_ERRBUF_SIZE, "PacketGetStats error: %s", pcap_win32strerror());
 		return -1;
 	}

@@ -538,13 +538,21 @@ auth_again:
 			{
 				if (fp)
 				{
-				struct pcap_stat stats;
+				struct pcap_stat stats = {};
 
 					// Save statistics (we can need them in the future)
 					if (pcap_stats(fp->fp, &stats) )
 					{
 						ifdrops= stats.ps_ifdrop;
+#ifdef WIN32
+						/*
+						 * Don't count filtered packets as received
+						 * XXX: fix this in the kernel driver someday
+						 */
+						ifrecv=stats.ps_capt + stats.ps_drop;
+#else
 						ifrecv= stats.ps_recv;
+#endif
 						krnldrop= stats.ps_drop;
 						svrcapt= fp->ds.pcap_dispatched;
 					}
@@ -1615,7 +1623,7 @@ int daemon_getstats(struct daemon_ctx *fp)
 {
 char sendbuf[RPCAP_NETBUF_SIZE];	// temporary buffer in which data to be sent is buffered
 int sendbufidx= 0;					// index which keeps the number of bytes currently buffered
-struct pcap_stat stats;				// local statistics
+struct pcap_stat stats = {};		// local statistics
 struct rpcap_stats *netstats;		// statistics sent on the network
 
 	if ( sock_bufferize(NULL, sizeof(struct rpcap_header), NULL, 
@@ -1634,7 +1642,15 @@ struct rpcap_stats *netstats;		// statistics sent on the network
 		goto error;
 
 	netstats->ifdrop= htonl(stats.ps_ifdrop);
+#ifdef WIN32
+	/*
+	 * Don't count filtered packets as received
+	 * XXX: fix this in the kernel driver someday
+	 */
+	netstats->ifrecv= htonl(stats.ps_capt + stats.ps_drop);
+#else
 	netstats->ifrecv= htonl(stats.ps_recv);
+#endif
 	netstats->krnldrop= htonl(stats.ps_drop);
 	netstats->svrcapt= htonl(fp->ds.pcap_dispatched);
 
