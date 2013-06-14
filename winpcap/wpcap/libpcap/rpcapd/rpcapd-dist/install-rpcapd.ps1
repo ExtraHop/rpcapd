@@ -102,6 +102,8 @@ try {
     write-host "Stopping $service_name service..."
     stop-service -inputobject $serv
     sleep -m 500
+    write-host "Deleting $service_name service..."
+    sc.exe delete $service_name
 }
 catch { }
 
@@ -127,12 +129,10 @@ new-itemproperty -path $rpath -name ParameterMessageFile -type string `
 new-itemproperty -path $rpath -name TypesSupported -type dword `
                  -value 0x7 > $null
 
-if ($serv -eq $null) {
-    write-host "Creating $service_name service..."
-    $serv = new-service -name $service_name -binarypathname $execmd `
-                        -displayname "Remote Packet Capture (rpcapd)"
-}
+write-host "(Re)creating $service_name service..."
+$serv = new-service -name $service_name -binarypathname $execmd `
+                    -displayname "Remote Packet Capture (rpcapd)"
 write-host "Starting $service_name service..."
-start-service -inputobject $serv
+start-service -name $service_name
 write-host "Success!"
 
