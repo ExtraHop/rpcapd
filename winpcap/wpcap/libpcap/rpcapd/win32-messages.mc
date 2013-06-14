@@ -20,7 +20,7 @@ Severity=Success
 Facility=Application
 SymbolicName=MSG_SUCCESS
 Language=English
-Success: %1
+%1
 .
 
 MessageId=0x2
@@ -28,7 +28,7 @@ Severity=Informational
 Facility=Application
 SymbolicName=MSG_INFO
 Language=English
-Info: %1
+%1
 .
 
 MessageId=0x3
@@ -36,7 +36,7 @@ Severity=Warning
 Facility=Application
 SymbolicName=MSG_WARNING
 Language=English
-Warning: %1
+%1
 .
 
 MessageId=0x4
@@ -44,6 +44,6 @@ Severity=Error
 Facility=Application
 SymbolicName=MSG_ERROR
 Language=English
-Error: %1
+%1
 .
 
