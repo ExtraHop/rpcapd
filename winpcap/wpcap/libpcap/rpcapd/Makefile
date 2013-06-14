@@ -52,13 +52,10 @@ default:
 	$(MAKE) PLATFORM=windows executable
 endif
 
-
-# Makefile syntax:
-# Project name : dependencies
-#  command line
+executable: $(TARGET)
 
 # XXX: using object files would make incremental rebuilds faster...
-executable: $(FILES)
+$(TARGET): $(FILES)
 	$(CC) $(CFLAGS) $(INCLUDE) $(LIBPATH) -o $(TARGET) $(FILES) $(LIB)
 
 win32-messages.o: win32-messages.mc
