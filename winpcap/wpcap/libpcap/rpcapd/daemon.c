@@ -549,7 +549,9 @@ auth_again:
 						 * Don't count filtered packets as received
 						 * XXX: fix this in the kernel driver someday
 						 */
-						ifrecv=stats.ps_capt + stats.ps_drop;
+						ifrecv= stats.ps_capt + stats.ps_drop;
+#elif defined(USE_DISPATCHED_FOR_IFRECV)
+						ifrecv= htonl(fp->ds.pcap_dispatched + stats.ps_drop);
 #else
 						ifrecv= stats.ps_recv;
 #endif
@@ -1648,6 +1650,8 @@ struct rpcap_stats *netstats;		// statistics sent on the network
 	 * XXX: fix this in the kernel driver someday
 	 */
 	netstats->ifrecv= htonl(stats.ps_capt + stats.ps_drop);
+#elif defined(USE_DISPATCHED_FOR_IFRECV)
+	netstats->ifrecv= htonl(fp->ds.pcap_dispatched + stats.ps_drop);
 #else
 	netstats->ifrecv= htonl(stats.ps_recv);
 #endif

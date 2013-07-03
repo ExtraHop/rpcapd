@@ -2,11 +2,14 @@
 # Makefile for the remote daemon
 ################################
 
+OSXCC   = xcrun -sdk macosx10.8 clang
 LINUXCC = gcc
 WINCC   = x86_64-w64-mingw32-gcc  # 64-bit
 
 CFLAGS		= -DHAVE_REMOTE -DHAVE_SNPRINTF -D_GNU_SOURCE=1 -O3 -g
 LINUXCFLAGS = -pthread
+OSXCFLAGS   = -pthread -mmacosx-version-min=10.6 -DHAVE_VSNPRINTF -DHAVE_STRLCPY \
+              -DUSE_DISPATCHED_FOR_IFRECV
 WINCFLAGS   = -DHAVE_STRUCT_TIMESPEC
 
 #flags for debugging: -D_DEBUG -g -Wall
@@ -15,6 +18,7 @@ INCLUDE	= -I../
 WININCLUDE = -I../Win32/Include -I../../../Common -I../../../../win32-pthreads
 
 LINUXLIB = -lpcap -lcrypt -static
+OSXLIB   = -lpcap
 WINLIB   = -lwpcap -lpthreadGC2 -lpacket -lws2_32
 
 LINUXLIBPATH = -L../
@@ -27,6 +31,7 @@ FILES = rpcapd.c daemon.c utils.c fileconf.c ../pcap-remote.c ../sockutils.c \
 WINFILES = win32-svc.c win32-messages.o
 
 LINUXTARGET = rpcapd
+OSXTARGET   = rpcapd.osx  # XXX: should be just rpcapd
 WINTARGET   = rpcapd.exe
 
 # XXX: this is awful...I think this is why they invented autotools 25 years ago.
@@ -46,6 +51,14 @@ else ifeq ($(PLATFORM), linux)
 	LIB += $(LINUXLIB)
 	LIBPATH += $(LINUXLIBPATH)
 	TARGET = $(LINUXTARGET)
+else ifeq ($(PLATFORM), osx)
+	CC = $(OSXCC)
+	FILES += $(OSXFILES)
+	CFLAGS += $(OSXCFLAGS)
+	INCLUDE += $(OSXINCLUDE)
+	LIB += $(OSXLIB)
+	LIBPATH += $(OSXLIBPATH)
+	TARGET = $(OSXTARGET)
 else
 default:
 	$(MAKE) PLATFORM=linux executable
@@ -67,7 +80,7 @@ install:
 	chmod 0755 rpcapd-dist/rpcapd-64bit-linux
 
 clean:
-	rm -f rpcapd rpcapd.exe win32-messages.bin win32-messages.h \
+	rm -f rpcapd rpcapd.osx rpcapd.exe win32-messages.bin win32-messages.h \
 		  win32-messages.o win32-messages.rc
 
 distclean: clean
