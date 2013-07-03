@@ -2234,6 +2234,7 @@ daemon_sendthread_start(void *ptr)
 #endif
         }
     }
+    return NULL;
 }
 
 /**

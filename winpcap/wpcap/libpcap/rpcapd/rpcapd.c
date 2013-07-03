@@ -97,7 +97,7 @@ void main_active(void *ptr);
 void main_cleanup_childs(int sign);
 #endif
 
-int
+void
 rpcapd_log_init(const char *argv0, int also_stderr)
 {
 #ifdef WIN32
