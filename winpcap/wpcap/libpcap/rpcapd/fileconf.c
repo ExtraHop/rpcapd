@@ -36,8 +36,15 @@
 #include <string.h>
 #include <signal.h>
 #include <pcap.h>		// for PCAP_ERRBUF_SIZE
+
+#ifdef linux
+#include <netinet/in.h>
+#include <linux/if_packet.h>
+#endif
+
 #include "rpcapd.h"
 #include "pcap-remote.h"
+#include "sockutils.h"
 
 
 extern char hostlist[MAX_HOST_LIST + 1];		//!< Keeps the list of the hosts that are allowed to connect to this server
@@ -49,7 +56,146 @@ extern char loadfile[MAX_LINE + 1];			//!< Name of the file from which we have t
 
 int strrem(char *string, char chr);
 
+static void
+fileconf_sockaddr_to_text(struct sockaddr *addr, char *addrstr, int addrstrsize)
+{
+    char buf[64];
+    socklen_t sockaddrlen;
+#ifdef WIN32
+    sockaddrlen = sizeof(struct sockaddr_in6);
+#else
+    sockaddrlen = sizeof(struct sockaddr_storage);
+#endif
+    buf[0] = '\0';
+    addrstr[0] = '\0';
+    if (getnameinfo(addr, sockaddrlen, buf, sizeof(buf), NULL, 0,
+                    NI_NUMERICHOST | NI_NUMERICSERV) != 0) {
+#ifdef AF_PACKET
+        if (addr->sa_family == AF_PACKET) {
+            const struct sockaddr_ll *sll = (struct sockaddr_ll *)addr;
+            if (sll->sll_halen == 6) {
+                snprintf(addrstr, addrstrsize,
+                         "mac %02X:%02X:%02X:%02X:%02X:%02X",
+                         sll->sll_addr[0], sll->sll_addr[1], sll->sll_addr[2],
+                         sll->sll_addr[3], sll->sll_addr[4], sll->sll_addr[5]);
+            }
+        }
+#endif
+        if (addrstr[0] == '\0') {
+            snprintf(addrstr, addrstrsize, "unknown sa_family=%d",
+                     (int)addr->sa_family);
+        }
+    }
+    else if (addr->sa_family == AF_INET) {
+        snprintf(addrstr, addrstrsize, "ip %s", buf);
+    }
+    else if (addr->sa_family == AF_INET6) {
+        snprintf(addrstr, addrstrsize, "ipv6 %s", buf);
+    }
+    else {
+        snprintf(addrstr, addrstrsize, "%s", buf);
+    }
+}
 
+static int
+fileconf_parse_ifname(struct active_pars *ap, char *ifname)
+{
+    static int have_printed_ifs;
+    char errbuf[PCAP_ERRBUF_SIZE + 1];
+    char addrstr[64];
+    pcap_if_t *alldevs = NULL, *d;
+    struct pcap_addr *addr;
+    int rc = 1;
+    int print_ifs = 0;
+
+    errbuf[0] = '\0';
+
+    if ((ifname == NULL) || (ifname[0] == '\0')) {
+        goto out;
+    }
+
+    if (pcap_findalldevs(&alldevs, errbuf) != 0) {
+        log_warn("ERROR: pcap_findalldevs: %s", errbuf);
+        goto out;
+    }
+ print_interfaces:
+    if (print_ifs) {
+        log_warn("========== available pcap interfaces ==========");
+    }
+    for (d = alldevs; d != NULL; d = d->next) {
+        if (print_ifs) {
+            log_warn("   ifname=%s desc='%s'", d->name,
+                     (d->description != NULL) ? d->description : "");
+            for (addr = d->addresses; addr != NULL; addr = addr->next) {
+                fileconf_sockaddr_to_text(addr->addr,
+                                          addrstr, sizeof(addrstr));
+                log_warn("       addr %s", addrstr);
+            }
+        }
+        if (strcmp(d->name, ifname) == 0) {
+            rc = 0;
+            snprintf(ap->ifname, sizeof(ap->ifname), "%s", d->name);
+            break;
+        }
+    }
+    if (print_ifs) {
+        log_warn("===============================================");
+    }
+    if (alldevs == NULL) {
+        log_warn("ERROR: pcap_findalldevs returned no interfaces.");
+        log_warn("ERROR: Please run rpcapd as administrator or root.");
+    }
+    else if ((rc != 0) && !print_ifs) {
+        log_warn("WARNING: Could not find interface with name '%s'.", ifname);
+        if (!have_printed_ifs) {
+            have_printed_ifs = 1;
+            print_ifs = 1;
+            goto print_interfaces;
+        }
+    }
+ out:
+    pcap_freealldevs(alldevs);
+    return rc;
+}
+
+static int
+fileconf_parse_activeclient_kv(struct active_pars *ap)
+{
+    static int printed_space_warning;
+    char *kv;
+    char *key, *val;
+    char *p;
+    int rc = 0;
+    int rc2;
+
+    while ((kv = strtok(NULL, RPCAP_HOSTLIST_SEP)) != NULL) {
+        key = kv;
+        val = NULL;
+        p = strchr(kv, '=');
+        if (p != NULL) {
+            p[0] = '\0';
+            val = p + 1;
+        }
+        else if (!printed_space_warning) {
+            printed_space_warning = 1;
+            log_warn("WARNING: Make sure there are no spaces on"
+                     " ActiveClient lines.");
+        }
+        if (strcmp(key, "ifname") == 0) {
+            rc2 = fileconf_parse_ifname(ap, val);
+            if (rc2 != 0) {
+                rc = rc2;
+            }
+        }
+        else {
+           log_warn("WARNING: Could not parse ActiveClient option '%s'.", kv);
+           if (rc == 0) {
+               rc = -1;
+           }
+        }
+    }
+    return rc;
+}
 
 void fileconf_read(int sign)
 {
@@ -63,13 +209,16 @@ int i;
 	if ((fp= fopen(loadfile, "r") ) != NULL)
 	{
 	char line[MAX_LINE + 1];
+	char linecopy[MAX_LINE + 1];
 	char *ptr;
+	int linenum = 0;
 
 		hostlist[0]= 0;
 		i= 0;
 
 		while ( fgets(line, MAX_LINE, fp) != NULL )
 		{
+		    linenum++;
 			if (line[0] == '\n') continue;	// Blank line
 			if (line[0] == '\r') continue;	// Blank line
 			if (line[0] == '#') continue;	// Comment
@@ -77,6 +226,13 @@ int i;
 			if ( (ptr= strstr(line, "ActiveClient")) )
 			{
 			char *address, *port;
+
+			    // copy the line since strtok will add nulls
+			    strcpy(linecopy, line);
+			    if (strlen(linecopy) > 0) {
+			        // remove trailing '\n'
+			        linecopy[strlen(linecopy) - 1] = '\0';
+			    }
 
 				ptr= strchr(ptr, '=') + 1;
 				address= strtok(ptr, RPCAP_HOSTLIST_SEP);
@@ -90,6 +246,14 @@ int i;
 						snprintf(activelist[i].port, MAX_LINE, RPCAP_DEFAULT_NETPORT_ACTIVE);
 					else
 						snprintf(activelist[i].port, MAX_LINE, "%s", port);
+
+					if (port != NULL) {
+					    int rc = fileconf_parse_activeclient_kv(&activelist[i]);
+					    if (rc != 0) {
+					        log_warn("    %s line %d:", loadfile, linenum);
+					        log_warn("        %s", linecopy);
+					    }
+					}
 
 					activelist[i].address[MAX_LINE] = 0;
 					activelist[i].port[MAX_LINE] = 0;

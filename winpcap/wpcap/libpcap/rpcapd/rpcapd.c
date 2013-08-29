@@ -487,6 +487,13 @@ int i;
 	while ( (activelist[i].address[0] != 0) && (i < MAX_ACTIVE_LIST) )
 	{
 		activelist[i].ai_family= mainhints.ai_family;
+
+        // use global preselected interface if not set in config file
+		if ((activelist[i].ifname[0] == '\0') &&
+            (rpcapd_opt.preselected_ifname[0] != '\0')) {
+		    snprintf(activelist[i].ifname, sizeof(activelist[i].ifname),
+		             "%s", rpcapd_opt.preselected_ifname);
+		}
 		
 #ifdef WIN32
 		/* GV we need this to create the thread as detached. */
@@ -872,6 +879,8 @@ struct daemon_slpars *pars;			// parameters needed by the daemon_serviceloop()
 		pars->activeclose= 0;
 		pars->isactive= 1;
 		pars->nullAuthAllowed= nullAuthAllowed;
+		pars->preselected_ifname =
+		        (activepars->ifname[0] != '\0') ? activepars->ifname : NULL;
 
 		daemon_serviceloop( (void *) pars);
 

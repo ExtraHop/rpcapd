@@ -239,9 +239,9 @@ daemon_ctx_close(struct daemon_ctx *fp)
 int daemon_checkauth(SOCKET sockctrl, int nullAuthAllowed, char *errbuf);
 int daemon_AuthUserPwd(char *username, char *password, char *errbuf);
 
-int daemon_findalldevs(SOCKET sockctrl, char *errbuf);
+int daemon_findalldevs(SOCKET sockctrl, char *errbuf, char *preselected_ifname);
 
-int daemon_opensource(SOCKET sockctrl, char *source, int srclen, uint32 plen, char *errbuf);
+int daemon_opensource(SOCKET sockctrl, char *source, int srclen, uint32 plen, char *errbuf, char *preselected_ifname);
 struct daemon_ctx *daemon_startcapture(SOCKET sockctrl, pthread_t *threaddata, char *source, int active,
 							struct rpcap_sampling *samp_param, uint32 plen, char *errbuf);
 int daemon_endcapture(struct daemon_ctx *fp, pthread_t *threaddata, char *errbuf);
@@ -457,7 +457,7 @@ auth_again:
 				if (ntohl(header.plen))
 					sock_discard(pars->sockctrl, ntohl(header.plen), errbuf, PCAP_ERRBUF_SIZE);
 
-				if (daemon_findalldevs(pars->sockctrl, errbuf) )
+				if (daemon_findalldevs(pars->sockctrl, errbuf, pars->preselected_ifname) )
 					log_warn("%s", errbuf);
 
 				break;
@@ -465,7 +465,7 @@ auth_again:
 
 			case RPCAP_MSG_OPEN_REQ:
 			{
-				retval= daemon_opensource(pars->sockctrl, source, sizeof(source), ntohl(header.plen), errbuf);
+				retval= daemon_opensource(pars->sockctrl, source, sizeof(source), ntohl(header.plen), errbuf, pars->preselected_ifname);
 
 				if (retval == -1)
 					log_warn("%s", errbuf);
@@ -927,7 +927,7 @@ int daemon_AuthUserPwd(char *username, char *password, char *errbuf)
 
 
 // PORTING WARNING We assume u_int is a 32bit value
-int daemon_findalldevs(SOCKET sockctrl, char *errbuf)
+int daemon_findalldevs(SOCKET sockctrl, char *errbuf, char *preselected_ifname)
 {
 char new_description[256];
 char sendbuf[RPCAP_NETBUF_SIZE];			// temporary buffer in which data to be sent is buffered
@@ -974,8 +974,8 @@ uint16 nif= 0;								// counts the number of interface listed
 			plen+= strlen(d->description);
 		if (d->name) {
 			plen+= strlen(d->name);
-			if ((rpcapd_opt.preselected_ifname[0] != '\0') &&
-			    (strcmp(rpcapd_opt.preselected_ifname, d->name) == 0) &&
+			if ((preselected_ifname != NULL) &&
+			    (strcmp(preselected_ifname, d->name) == 0) &&
 			    (orig_alldevs == NULL)) {
 			    // move the preselected to the front of the alldevs list
 			    orig_alldevs = alldevs;
@@ -1119,7 +1119,8 @@ uint16 nif= 0;								// counts the number of interface listed
 	\param plen: the length of the current message (needed in order to be able
 	to discard excess data in the message, if present)
 */
-int daemon_opensource(SOCKET sockctrl, char *source, int srclen, uint32 plen, char *errbuf)
+int daemon_opensource(SOCKET sockctrl, char *source, int srclen, uint32 plen, char *errbuf,
+                      char *preselected_ifname)
 {
 pcap_t *fp= NULL;					// pcap_t main variable
 unsigned int nread;					// number of bytes of the payload read from the socket
@@ -1146,13 +1147,13 @@ struct rpcap_openreply *openreply;	// open reply message
 	// Puts a '0' to terminate the source string
 	source[strlen(PCAP_SRC_IF_STRING) + plen]= 0;
 
-	if ((rpcapd_opt.preselected_ifname[0] != '\0') &&
-        (strcmp(rpcapd_opt.preselected_ifname,
+	if ((preselected_ifname != NULL) &&
+        (strcmp(preselected_ifname,
                 &source[strlen(PCAP_SRC_IF_STRING)]) != 0)) {
 	    // trying to open an interface that doesn't match the preselected
 	    snprintf(errbuf, PCAP_ERRBUF_SIZE,
 	             "can only open preselected interface '%s'",
-	             rpcapd_opt.preselected_ifname);
+	             preselected_ifname);
 	    rpcap_senderror(sockctrl, errbuf, PCAP_ERR_OPEN, NULL);
 	    source[0] = '\0';
 	    return -1;

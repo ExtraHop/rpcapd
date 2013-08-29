@@ -45,6 +45,7 @@ struct active_pars
 {
 	char address[MAX_LINE + 1];		// keeps the network address (either numeric or literal) to of the active client
 	char port[MAX_LINE + 1];		// keeps the network port to bind to
+	char ifname[255];               // optional preselected interface name
 	int ai_family;					// address faimly to use
 };
 

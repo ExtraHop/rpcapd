@@ -40,6 +40,7 @@ struct daemon_slpars
 	int isactive;				//!< Not null if the daemon has to run in active mode
 	int nullAuthAllowed;		//!< '1' if we permit NULL authentication, '0' otherwise
 	int activeclose;			//!< '1' if the client closed the control connection explicitely; used in active mode only
+	char *preselected_ifname;   //!< preselected interface name, like "eth0", or NULL
 };
 
 
