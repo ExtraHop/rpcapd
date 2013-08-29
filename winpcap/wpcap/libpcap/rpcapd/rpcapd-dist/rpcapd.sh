@@ -30,6 +30,7 @@ Options:
                   actually install rpcapd.
   -c: Only update the configuration file, $RPCAPD_CFG_PATH,
       with <extrahop_ip> and <rpcap_port>
+  -k: Keep existing rpcapd.ini if it exists
   -h: Print help.
 EOM
     exit 2
@@ -42,15 +43,17 @@ fetch_dir=
 no_fetch=
 fetch_only=
 cfg_update_only=
+keep_cfg=
 
 # process arguments
 OPTIND=1
-while getopts "u:i:o:ch" opt; do
+while getopts "u:i:o:ckh" opt; do
     case "$opt" in
         u) fetch_uri="$OPTARG";;
         i) fetch_dir="$OPTARG"; no_fetch="y";;
         o) fetch_dir="$OPTARG"; fetch_only="y";;
         c) cfg_update_only="y";;
+        k) keep_cfg="y";;
         h) usage;;
     esac
 done
@@ -154,14 +157,16 @@ NullAuthPermit = YES
 EOF
 )
 
-echo "Writing config to $RPCAPD_CFG_PATH with contents:"
-echo "$cfg"
+if [ ! -r "$RPCAPD_CFG_PATH" -o -z "$keep_cfg" ]; then
+    echo "Writing config to $RPCAPD_CFG_PATH with contents:"
+    echo "$cfg"
 
-set -e
-mkdir -p $(dirname "${RPCAPD_CFG_PATH}")
-echo "$cfg" > "$RPCAPD_CFG_PATH"
-chmod 644 "$RPCAPD_CFG_PATH"
-set +e
+    set -e
+    mkdir -p $(dirname "$RPCAPD_CFG_PATH")
+    echo "$cfg" > "$RPCAPD_CFG_PATH"
+    chmod 644 "$RPCAPD_CFG_PATH"
+    set +e
+fi
 
 if [ -z "$fetch_only" -a -x "$RPCAPD_INIT_PATH" ]; then
     echo "Adding $RPCAPD_INIT_PATH to startup via $init_add_cmd"
