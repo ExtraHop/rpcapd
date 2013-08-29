@@ -1,6 +1,6 @@
 param (
     [parameter(mandatory=$false)][string]$MgmtIP,
-    [parameter(mandatory=$true)][string]$RpcapIP,
+    [parameter(mandatory=$false)][string]$RpcapIP,
     [parameter(mandatory=$false)][string]$InputDir,
     [parameter(mandatory=$false)][string]$OutputDir,
     [parameter(mandatory=$false)][string]$ZipUrl,
