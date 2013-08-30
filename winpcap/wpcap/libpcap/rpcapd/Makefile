@@ -84,3 +84,4 @@ clean:
 		  win32-messages.o win32-messages.rc
 
 distclean: clean
+	rm -f rpcapd-dist/rpcapd-64bit-linux
