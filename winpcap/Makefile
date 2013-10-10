@@ -1,4 +1,4 @@
-include ../../global.mk
+include ../vars.mk
 
 PKG = rpcapd.tgz
 INSTALLER_TARGET = install-rpcapd.sh
@@ -11,9 +11,14 @@ RPCAPD_FILES = \
 	rpcapd.debianinit           \
 	rpcapd.sysvinit
 
-SUBDIRS = \
+ifdef WINCC_VERSION
+SUBDIRS += \
 	packetNtx/Dll/Project \
 	wpcap/PRJ \
+
+endif
+
+SUBDIRS += \
 	wpcap/libpcap/rpcapd \
 
 .PHONY: all
@@ -41,12 +46,16 @@ install: $(SUBDIRS)
 		   wpcap/libpcap/rpcapd/rpcapd-dist/install-rpcapd.ps1
 	$(INSTALL) -m 755 wpcap/libpcap/rpcapd/rpcapd-dist/install-rpcapd.ps1 \
 					  install/www/tools/install-rpcapd.ps1
+ifdef PACKAGES
 	tar -C install -cvzf $(PACKAGES)/$(PKG) .
+endif
 
 .PHONY: distclean
 distclean: clean
 	rm -rf install
+ifdef PACKAGES
 	rm -f $(PACKAGES)/$(PKG)
+endif
 
 .PHONY: $(SUBDIRS)
 $(SUBDIRS):

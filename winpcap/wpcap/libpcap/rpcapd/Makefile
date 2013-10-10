@@ -1,10 +1,7 @@
 ################################
 # Makefile for the remote daemon
 ################################
-
-OSXCC   = xcrun -sdk macosx10.8 clang
-LINUXCC = gcc
-WINCC   = x86_64-w64-mingw32-gcc  # 64-bit
+include ../../../../vars.mk
 
 CFLAGS		= -DHAVE_REMOTE -DHAVE_SNPRINTF -D_GNU_SOURCE=1 -O3 -g
 LINUXCFLAGS = -pthread
@@ -62,7 +59,9 @@ else ifeq ($(PLATFORM), osx)
 else
 default:
 	$(MAKE) PLATFORM=linux executable
+ifdef WINCC_VERSION
 	$(MAKE) PLATFORM=windows executable
+endif
 endif
 
 executable: $(TARGET)
