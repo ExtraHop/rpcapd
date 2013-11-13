@@ -1,22 +1,26 @@
 rpcapd Packet Forwarder
 =======================
 
-The rpcapd server is a thin wrapper around libpcap that forwards captured
-packets to connected clients.  The usual use case is to run rpcapd on a server,
-for example an AWS instance, and then connect to the instance with Wireshark
-to capture all the packets the instance sees. rpcapd supports most libpcap
-features, for example using bpf filters to reduce network load by only
-forwarding packets that you're interested in.
+The rpcapd daemon is a thin wrapper around libpcap that allows for remote
+packet capture. Clients connecting to the rpcapd server will authenticate,
+choose a capture interface, optionally set up compiled BPF filters,
+and start or stop the forwarding of captured packets.
+
+rpcapd can run in two modes:
+
+*   Passive mode - The client connects to the rpcapd server, authenticates,
+    sets the capture options, and starts the capture.
+*   Active mode - The rpcapd server connects to the client.  rpcapd
+    does not listen for any incoming connections.
 
 The main rpcapd source code repository is inside of the winpcap project.
 
 
-Development
------------
+Building
+--------
 
 The rpcapd source code is a few levels deep in the winpcap folder:
-
-    [winpcap/wpcap/libpcap/rpcapd/](winpcap/wpcap/libpcap/rpcapd/)
+[winpcap/wpcap/libpcap/rpcapd/](winpcap/wpcap/libpcap/rpcapd/)
 
 To build, first install gcc and libpcap-dev:
 
@@ -26,9 +30,8 @@ Then make in the top-level folder:
 
     make
 
-The resulting binary will be in the rpcapd directory:
-
-    winpcap/wpcap/libpcap/rpcapd/
+The resulting binary, `rpcapd`, will be in the rpcapd directory:
+[winpcap/wpcap/libpcap/rpcapd/](winpcap/wpcap/libpcap/rpcapd/)
 
 (Optional) To build the windows binary, install x86_64-w64-mingw32-gcc (or
 edit vars.mk).  Running `make` will output rpcapd.exe in the rpcapd directory
@@ -42,7 +45,7 @@ This repository is a modified rpcapd with some changes:
 
 ### udpstr mode
 
-The vanilla rpcapd forwards each captured packet encapsulated
+The unmodified winpcap rpcapd forwards each captured packet encapsulated
 in a udp packet with some added headers:
 
     outer packet, with udp payload:
@@ -52,18 +55,19 @@ in a udp packet with some added headers:
 
 There are a few problems with this:
 
-a.  If the captured packet was the full MTU, e.g. 1500 bytes, then rpcapd
-    will send a udp packet that's 1500 bytes + rpcap headers, so larger
-    than MTU.  This results in the udp packet getting sent as two
-    IP fragments.  Essentially every full MTU packet captured results
+*   If the captured packet was the full MTU, e.g., 1500 bytes, then rpcapd
+    sends a udp packet that is 1500 bytes + rpcap headers, which is larger
+    than the MTU. This results in the udp packet being sent as two
+    IP fragments. Essentially, every full MTU packet capture results
     in two sent packets.
 
-b.  Each forwarded small packet will have a lot of overhead.  Suppose a
-    server was only sending and receiving small packets, then
-    forwarding each packet in its own udp packet would be twice as
+*   Each forwarded small packet increases overhead. For example, if a
+    server is sending and receiving only small packets, then
+    forwarding each packet in its own udp packet uses twice as
     much bandwidth as the original traffic.
 
-c.  More sent/received packets causes more overhead for the operating system.
+*   More sent and received packets causes more overhead for the operating
+    system.
 
 udpstr mode packs multiple captured packets into full MTU-sized udp
 packets:
@@ -80,22 +84,22 @@ packets:
     [ beginning captured packet data, to be continued on next udp packet ]
 
 This results in fewer udp packets, no IP fragments, and less bandwidth
-overhead.  It's a little less resilient to lost or out of order udp packets,
-but there are is a sequence number and first-header index in the
-struct rpcap_udpstr_header, so only captured packets that are split across
-udpstr packets are lost.
+overhead. However, lost or out-of-order udp packets can mean that more than
+one captured packet is lost. The struct rpcap_udpstr_header contains a sequence
+number and first-header index, so only captured packets that are split across
+multiple udpstr packets are lost.
 
 ### preselected interfaces
 
-In the ExtraHop use case, rpcapd only runs in active mode, with rpcapd
-connecting out to the ExtraHop instead of the other way around.  By default,
-the ExtraHop will select which interface to capture on, e.g. eth0 vs eth1,
-by looking at the IP addresses of each interface when a new rpcapd connects.
+In the ExtraHop use case, rpcapd runs only in active mode, with rpcapd
+connecting out to the ExtraHop system. By default,
+the ExtraHop system selects the interface (e.g., eth0 or eth1) to use for capture 
+by reading the IP addresses of each interface when a new rpcapd connects.
 This way, all the configuration is on the ExtraHop side instead of on each
-server.
+rpcapd server.
 
-In some cases, it's easier for the configuration to be on the server, for
-example capturing traffic from two interfaces at once.  In this case, there
-are now options for rpcapd to "preselect" which interfaces to capture on,
-regardless of how the ExtraHop is configured.
+In some cases, it is best practice for the configuration to be on the server,
+such as when capturing traffic from two interfaces at once. In this case, there
+are added options for rpcapd to preselect the interfaces to use for capture,
+regardless of how the ExtraHop system is configured.
 
